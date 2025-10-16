@@ -12,6 +12,9 @@ private:
     void createDevice();
     void createSurface();
     void createSwapchain();
+    void createGraphicsPipeline();
+    void createRenderpass();
+    void createFramebuffers();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -27,6 +30,10 @@ private:
     SurfaceDetails surfaceDetails;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
+    VkPipeline graphicsPipeline;
+    VkPipelineLayout graphicsPipelineLayout;
+    VkRenderPass renderpass;
+    std::vector<VkFramebuffer> swapchainFramebuffers;
 
     bool isDeviceSuitable(VkPhysicalDevice dev);
     QueueFamilies getQueueFamilies(VkPhysicalDevice dev);
@@ -35,6 +42,7 @@ private:
     VkPresentModeKHR choosePresentMode(std::vector<VkPresentModeKHR> presentModes);
     VkExtent2D chooseSurfaceExtent(VkSurfaceCapabilitiesKHR cap);
     void createImageView(VkImage image, VkImageView& imageView, VkFormat format, VkImageAspectFlags aspectMask);
+    VkShaderModule createShaderModule(std::vector<char> code);
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
