@@ -10,16 +10,10 @@ Engine::Engine() {
     createFramebuffers();
 }
 Engine::~Engine() {
-    for (auto framebuffer: swapchainFramebuffers) {
-        vkDestroyFramebuffer(device, framebuffer, nullptr);
-    }
+    cleanupSwapchain();
     vkDestroyPipeline(device, gfxPipeline, nullptr);
     vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderpass, nullptr);
-    for (auto imageView: swapchainImageViews) {
-        vkDestroyImageView(device, imageView, nullptr);
-    }
-    vkDestroySwapchainKHR(device, swapchain, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
@@ -44,12 +38,18 @@ void Engine::run() {
 
         // wait until this command buffer is ready to be rerecorded
         vkWaitForFences(device, 1, &cmdBufferReady[currFrame], VK_TRUE, ~0ull);
-        vkResetFences(device, 1, &cmdBufferReady[currFrame]);
         
         // acquire free image from swapchain
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(device, swapchain, ~0ull, imageAvailable[currFrame], VK_NULL_HANDLE, &imageIndex);
+        VkResult res = vkAcquireNextImageKHR(device, swapchain, ~0ull, imageAvailable[currFrame], VK_NULL_HANDLE, &imageIndex);
+        if (res==VK_ERROR_OUT_OF_DATE_KHR) {
+            recreateSwapchain();
+            continue;
+        } else if (res!=VK_SUCCESS && res!=VK_SUBOPTIMAL_KHR) {
+            VK_CHECK(res);
+        }
         
+        vkResetFences(device, 1, &cmdBufferReady[currFrame]);
         vkResetCommandBuffer(gfxCommandBuffers[currFrame], 0);
         recordCommandBuffer(gfxCommandBuffers[currFrame], imageIndex);
         VkSubmitInfo submitInfo{};
@@ -71,7 +71,13 @@ void Engine::run() {
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = &swapchain;
         presentInfo.pImageIndices = &imageIndex;
-        vkQueuePresentKHR(graphicsQueue, &presentInfo);
+        res = vkQueuePresentKHR(graphicsQueue, &presentInfo);
+        if (res==VK_ERROR_OUT_OF_DATE_KHR) {
+            recreateSwapchain();
+            continue;
+        } else if (res!=VK_SUCCESS && res!=VK_SUBOPTIMAL_KHR) {
+            VK_CHECK(res);
+        }
 
         currFrame = (currFrame+1)%MAX_FRAMES_IN_FLIGHT;
     }
@@ -137,7 +143,6 @@ void Engine::createDevice() {
     }
     if (pDevice == VK_NULL_HANDLE) throw std::runtime_error("Error: no suitable physical device");
     queueFamilies = getQueueFamilies(pDevice);
-    surfaceDetails = getSurfaceDetails(pDevice);
 
     VkDeviceCreateInfo deviceInfo{};
     deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -222,6 +227,9 @@ void Engine::createSurface() {
     VK_CHECK(glfwCreateWindowSurface(instance, window, nullptr, &surface));
 }
 void Engine::createSwapchain() {
+    // query surface details here since during recreation of the swapchain we need to know
+    // the updated capabilities to figure out the new extent
+    SurfaceDetails surfaceDetails = getSurfaceDetails(pDevice);
     VkSurfaceFormatKHR surfaceFormat = chooseSurfaceFormat(surfaceDetails.formats);
     swapchainExtent = chooseSurfaceExtent(surfaceDetails.cap);
     swapchainFormat = surfaceFormat.format;
@@ -468,7 +476,7 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
             viewport.width = swapchainExtent.width;
             viewport.height = swapchainExtent.height;
             viewport.minDepth = 0.0f;
-            viewport.maxDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
             vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
             VkRect2D scissor{};
             scissor.extent = swapchainExtent;
@@ -482,6 +490,24 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
     VK_CHECK(vkEndCommandBuffer(cmdBuffer));
 
 }
+void Engine::cleanupSwapchain() {
+    for (auto framebuffer: swapchainFramebuffers) {
+        vkDestroyFramebuffer(device, framebuffer, nullptr);
+    }
+    for (auto imageView: swapchainImageViews) {
+        vkDestroyImageView(device, imageView, nullptr);
+    }
+    vkDestroySwapchainKHR(device, swapchain, nullptr);
+}
+void Engine::recreateSwapchain() {
+    vkDeviceWaitIdle(device);
+
+    cleanupSwapchain();
+
+    createSwapchain();
+    createFramebuffers();
+}
+
 SurfaceDetails Engine::getSurfaceDetails(VkPhysicalDevice dev) {
     SurfaceDetails _surfaceDetails;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev, surface, &_surfaceDetails.cap);
@@ -517,8 +543,8 @@ VkExtent2D Engine::chooseSurfaceExtent(VkSurfaceCapabilitiesKHR cap) {
         int width, height;
         glfwGetFramebufferSize(window, &width, &height);
         VkExtent2D actualExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
-        actualExtent.width = std::clamp(actualExtent.width, cap.minImageExtent.width, cap.minImageExtent.width);
-        actualExtent.height = std::clamp(actualExtent.height, cap.minImageExtent.height, cap.minImageExtent.height);
+        actualExtent.width = std::clamp(actualExtent.width, cap.minImageExtent.width, cap.maxImageExtent.width);
+        actualExtent.height = std::clamp(actualExtent.height, cap.minImageExtent.height, cap.maxImageExtent.height);
         return actualExtent;
     }
 }

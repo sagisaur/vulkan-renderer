@@ -16,6 +16,8 @@ private:
     void createRenderpass();
     void createFramebuffers();
     void recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex);
+    void recreateSwapchain();
+    void cleanupSwapchain();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -28,7 +30,6 @@ private:
     VkSwapchainKHR swapchain;
     VkFormat swapchainFormat;
     VkExtent2D swapchainExtent;
-    SurfaceDetails surfaceDetails;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
     VkPipeline gfxPipeline;
