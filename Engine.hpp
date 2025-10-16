@@ -15,6 +15,7 @@ private:
     void createGraphicsPipeline();
     void createRenderpass();
     void createFramebuffers();
+    void recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex);
 
     GLFWwindow* window;
     VkInstance instance;
@@ -30,8 +31,8 @@ private:
     SurfaceDetails surfaceDetails;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
-    VkPipeline graphicsPipeline;
-    VkPipelineLayout graphicsPipelineLayout;
+    VkPipeline gfxPipeline;
+    VkPipelineLayout gfxPipelineLayout;
     VkRenderPass renderpass;
     std::vector<VkFramebuffer> swapchainFramebuffers;
 
@@ -43,6 +44,10 @@ private:
     VkExtent2D chooseSurfaceExtent(VkSurfaceCapabilitiesKHR cap);
     void createImageView(VkImage image, VkImageView& imageView, VkFormat format, VkImageAspectFlags aspectMask);
     VkShaderModule createShaderModule(std::vector<char> code);
+    VkCommandPool createCommandPool(uint32_t queueFamily, VkCommandPoolCreateFlagBits flags);
+    VkCommandBuffer createCommandBuffer(VkCommandPool cmdPool);
+    VkFence createFence();
+    VkSemaphore createSemaphore();
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };

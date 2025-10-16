@@ -13,8 +13,8 @@ Engine::~Engine() {
     for (auto framebuffer: swapchainFramebuffers) {
         vkDestroyFramebuffer(device, framebuffer, nullptr);
     }
-    vkDestroyPipeline(device, graphicsPipeline, nullptr);
-    vkDestroyPipelineLayout(device, graphicsPipelineLayout, nullptr);
+    vkDestroyPipeline(device, gfxPipeline, nullptr);
+    vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderpass, nullptr);
     for (auto imageView: swapchainImageViews) {
         vkDestroyImageView(device, imageView, nullptr);
@@ -27,9 +27,50 @@ Engine::~Engine() {
     glfwTerminate();
 }
 void Engine::run() {
+    VkCommandPool gfxCommandPool = createCommandPool(queueFamilies.graphicsFamily.value(), VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+    VkCommandBuffer gfxCommandBuffer = createCommandBuffer(gfxCommandPool);
+    VkSemaphore imageAvailable = createSemaphore();
+    VkSemaphore renderDone = createSemaphore();
+    VkFence cmdBufferReady = createFence();
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+        // wait until this command buffer is ready to be rerecorded
+        vkWaitForFences(device, 1, &cmdBufferReady, VK_TRUE, ~0ull);
+        vkResetFences(device, 1, &cmdBufferReady);
+        
+        // acquire free image from swapchain
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(device, swapchain, ~0ull, imageAvailable, VK_NULL_HANDLE, &imageIndex);
+        
+        vkResetCommandBuffer(gfxCommandBuffer, 0);
+        recordCommandBuffer(gfxCommandBuffer, imageIndex);
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &gfxCommandBuffer;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &renderDone;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &imageAvailable;
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        submitInfo.pWaitDstStageMask = waitStages;
+        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, cmdBufferReady));
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = &renderDone;
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = &swapchain;
+        presentInfo.pImageIndices = &imageIndex;
+        vkQueuePresentKHR(graphicsQueue, &presentInfo);
     }
+    vkQueueWaitIdle(graphicsQueue);
+    vkDestroyCommandPool(device, gfxCommandPool, nullptr);
+    vkDestroyFence(device, cmdBufferReady, nullptr);
+    vkDestroySemaphore(device, imageAvailable, nullptr);
+    vkDestroySemaphore(device, renderDone, nullptr);
 }
 void Engine::createWindow() {
     glfwInit();
@@ -301,7 +342,7 @@ void Engine::createGraphicsPipeline() {
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
     pipelineLayoutInfo.setLayoutCount = 0;
     pipelineLayoutInfo.pSetLayouts = nullptr;
-    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &graphicsPipelineLayout));
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &gfxPipelineLayout));
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -314,11 +355,11 @@ void Engine::createGraphicsPipeline() {
     pipelineInfo.pRasterizationState = &rasterInfo;
     pipelineInfo.pMultisampleState = &msaaInfo;
     pipelineInfo.pColorBlendState = &colorBlendInfo;
-    pipelineInfo.layout = graphicsPipelineLayout;
+    pipelineInfo.layout = gfxPipelineLayout;
     pipelineInfo.renderPass = renderpass;
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = nullptr; // in case we want to derive this pipeline from an already existing one
-    VK_CHECK(vkCreateGraphicsPipelines(device, nullptr, 1, &pipelineInfo, nullptr, &graphicsPipeline));
+    VK_CHECK(vkCreateGraphicsPipelines(device, nullptr, 1, &pipelineInfo, nullptr, &gfxPipeline));
 
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
@@ -350,12 +391,22 @@ void Engine::createRenderpass() {
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
 
+    VkSubpassDependency dep{};
+    dep.srcSubpass = VK_SUBPASS_EXTERNAL; // implicit subpass before or after the rendering pass
+    dep.dstSubpass = 0; // current subpass, must be always bigger than srcSubpass
+    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.srcAccessMask = 0;
+    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
     VkRenderPassCreateInfo renderpassInfo{};
     renderpassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     renderpassInfo.attachmentCount = sizeof(attachments)/sizeof(attachments[0]);
     renderpassInfo.pAttachments = attachments;
     renderpassInfo.subpassCount = 1;
     renderpassInfo.pSubpasses = &subpass;
+    renderpassInfo.dependencyCount = 1;
+    renderpassInfo.pDependencies = &dep;
     VK_CHECK(vkCreateRenderPass(device, &renderpassInfo, nullptr, &renderpass));
 }
 void Engine::createFramebuffers() {
@@ -373,6 +424,52 @@ void Engine::createFramebuffers() {
         info.layers = 1;
         VK_CHECK(vkCreateFramebuffer(device, &info, nullptr, &swapchainFramebuffers[i]));
     }
+}
+void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex) {
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.pInheritanceInfo = nullptr; // which state to inherit from primary buffer, only relevant for seconday buffers
+    // VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT: command buffer will be rerecorded right after executing it once
+    // VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT: command buffer is secondary and will be entirely within a single renderpass
+    // VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT: command buffer can be resubmitted while it is also already pending execution
+    beginInfo.flags = 0;
+    VK_CHECK(vkBeginCommandBuffer(cmdBuffer, &beginInfo));
+    {
+        VkRenderPassBeginInfo renderpassBeginInfo{};
+        renderpassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderpassBeginInfo.renderPass = renderpass;
+        renderpassBeginInfo.framebuffer = swapchainFramebuffers[imageIndex];
+        renderpassBeginInfo.renderArea.offset = {0, 0};
+        renderpassBeginInfo.renderArea.extent = swapchainExtent;
+        std::array<VkClearValue, 1> clearValues{};
+        clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        renderpassBeginInfo.clearValueCount = clearValues.size();
+        renderpassBeginInfo.pClearValues = clearValues.data();
+        // VK_SUBPASS_CONTENTS_INLINE: render pass commands will be embedded in the primary command buffer itself and no secondary
+        // command buffer will be executed
+        // VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS: render pass commands will be executed from secondary command buffer
+        vkCmdBeginRenderPass(cmdBuffer, &renderpassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        {
+            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipeline);
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = swapchainExtent.width;
+            viewport.height = swapchainExtent.height;
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 0.0f;
+            vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
+            VkRect2D scissor{};
+            scissor.extent = swapchainExtent;
+            scissor.offset = {0, 0};
+            vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+
+            vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
+        }
+        vkCmdEndRenderPass(cmdBuffer);
+    }
+    VK_CHECK(vkEndCommandBuffer(cmdBuffer));
+
 }
 SurfaceDetails Engine::getSurfaceDetails(VkPhysicalDevice dev) {
     SurfaceDetails _surfaceDetails;
@@ -440,4 +537,47 @@ VkShaderModule Engine::createShaderModule(std::vector<char> code) {
     VkShaderModule shaderModule;
     VK_CHECK(vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule));
     return shaderModule;
+}
+VkCommandPool Engine::createCommandPool(uint32_t queueFamily, VkCommandPoolCreateFlagBits flags) {
+    VkCommandPoolCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    // VK_COMMAND_POOL_CREATE_TRANSIENT_BIT: command buffers allocated from this pool will be short-lived,
+    // meaning they will be reset or freed in a short timeframe
+    // VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT: any command buffer allocated from this pool can be
+    // individually reset to its initial state either by calling vkResetCommandBuffer or via
+    // implicit reset when calling vkBeginCommandBuffer
+    // if this flag is not set, then vkResetCommandBuffer must not be called for any command buffers from this pool
+    info.flags = flags;
+    info.queueFamilyIndex = queueFamily;
+    VkCommandPool cmdPool;
+    VK_CHECK(vkCreateCommandPool(device, &info, nullptr, &cmdPool));
+    return cmdPool;
+}
+VkCommandBuffer Engine::createCommandBuffer(VkCommandPool cmdPool) {
+    VkCommandBufferAllocateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    info.commandBufferCount = 1;
+    info.commandPool = cmdPool;
+    // VK_COMMAND_BUFFER_LEVEL_SECONDARY: cannot be submitted to queue directly, but can be called from PRIMARY buffer
+    // VK_COMMAND_BUFFER_LEVEL_PRIMARY: can be submitted to queue directly, but cannot be called from another buffer
+    info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    VkCommandBuffer cmdBuffer;
+    VK_CHECK(vkAllocateCommandBuffers(device, &info, &cmdBuffer));
+    return cmdBuffer;
+}
+VkFence Engine::createFence() {
+    VkFenceCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    VkFence fence;
+    VK_CHECK(vkCreateFence(device, &info, nullptr, &fence));
+    return fence;
+}
+VkSemaphore Engine::createSemaphore() {
+    VkSemaphoreCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    info.flags = 0;
+    VkSemaphore sem;
+    VK_CHECK(vkCreateSemaphore(device, &info, nullptr, &sem));
+    return sem;
 }
