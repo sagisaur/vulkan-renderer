@@ -35,4 +35,14 @@ private:
     VkPresentModeKHR choosePresentMode(std::vector<VkPresentModeKHR> presentModes);
     VkExtent2D chooseSurfaceExtent(VkSurfaceCapabilitiesKHR cap);
     void createImageView(VkImage image, VkImageView& imageView, VkFormat format, VkImageAspectFlags aspectMask);
+    std::vector<const char*> requiredInstanceLayers = {
+        "VK_LAYER_KHRONOS_validation"
+    };
+    std::vector<const char*> requiredInstanceExtensions = {
+        "VK_KHR_surface",
+        "VK_KHR_xcb_surface"
+    };
+    std::vector<const char*> requiredDeviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
 };

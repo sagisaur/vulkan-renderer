@@ -44,27 +44,22 @@ void Engine::createInstance() {
     vkEnumerateInstanceLayerProperties(&count, nullptr);
     std::vector<VkLayerProperties> availableLayers(count);
     vkEnumerateInstanceLayerProperties(&count, availableLayers.data());
-    std::vector<const char*> requiredLayers = {
-        "VK_LAYER_KHRONOS_validation"
-    };
-    std::set<std::string> requestedLayers(requiredLayers.begin(), requiredLayers.end());
+
+    std::set<std::string> requestedLayers(requiredInstanceLayers.begin(), requiredInstanceLayers.end());
     for (const auto layer: availableLayers) requestedLayers.erase(layer.layerName);
     if (!requestedLayers.empty()) throw std::runtime_error("Error: requested layers not supported");
-    instanceInfo.enabledLayerCount = requiredLayers.size();
-    instanceInfo.ppEnabledLayerNames = requiredLayers.data();
+    instanceInfo.enabledLayerCount = requiredInstanceLayers.size();
+    instanceInfo.ppEnabledLayerNames = requiredInstanceLayers.data();
 
     vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
     std::vector<VkExtensionProperties> availableExtensions(count);
     vkEnumerateInstanceExtensionProperties(nullptr, &count, availableExtensions.data());
-    std::vector<const char*> requiredExtensions = {
-        "VK_KHR_surface",
-        "VK_KHR_xcb_surface"
-    };
-    std::set<std::string> requestedExtensions(requiredExtensions.begin(), requiredExtensions.end());
+
+    std::set<std::string> requestedExtensions(requiredInstanceExtensions.begin(), requiredInstanceExtensions.end());
     for (const auto ext: availableExtensions) requestedExtensions.erase(ext.extensionName);
     if (!requestedExtensions.empty()) throw std::runtime_error("Error: requested instance extensions not supported");
-    instanceInfo.enabledExtensionCount = requiredExtensions.size();
-    instanceInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    instanceInfo.enabledExtensionCount = requiredInstanceExtensions.size();
+    instanceInfo.ppEnabledExtensionNames = requiredInstanceExtensions.data();
 
     VK_CHECK(vkCreateInstance(&instanceInfo, nullptr, &instance));
 }
@@ -88,24 +83,15 @@ void Engine::createDevice() {
     deviceInfo.enabledLayerCount = 0;
     deviceInfo.ppEnabledLayerNames = nullptr;
     
-    vkEnumerateDeviceExtensionProperties(pDevice, nullptr, &count, nullptr);
-    std::vector<VkExtensionProperties> availableExtensions(count);
-    vkEnumerateDeviceExtensionProperties(pDevice, nullptr, &count, availableExtensions.data());
-    std::vector<const char*> requiredExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
-    std::set<std::string> requestedExtensions(requiredExtensions.begin(), requiredExtensions.end());
-    for (const auto ext: availableExtensions) requestedExtensions.erase(ext.extensionName);
-    if (!requestedExtensions.empty()) throw std::runtime_error("Error: requested device extensions not supported");
-    deviceInfo.enabledExtensionCount = requiredExtensions.size();
-    deviceInfo.ppEnabledExtensionNames = requiredExtensions.data();
+    deviceInfo.enabledExtensionCount = requiredDeviceExtensions.size();
+    deviceInfo.ppEnabledExtensionNames = requiredDeviceExtensions.data();
 
     VkPhysicalDeviceFeatures features{};
-    vkGetPhysicalDeviceFeatures(pDevice, &features);
+    features.geometryShader = VK_TRUE;
     deviceInfo.pEnabledFeatures = &features;
 
     std::set<uint32_t> uniqueFamilies = {
-        queueFamilies.graphicsFamily.value(),
+        queueFamilies.graphicsFamily.value(), queueFamilies.presentFamily.value()
     };
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
     float priorioty = 1.0f;
@@ -131,11 +117,19 @@ bool Engine::isDeviceSuitable(VkPhysicalDevice dev) {
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(dev, &props);
 
-    QueueFamilies _queueFamilies = getQueueFamilies(dev);
-    SurfaceDetails _surfaceDetails = getSurfaceDetails(dev);
+    uint32_t count = 0;
+    vkEnumerateDeviceExtensionProperties(dev, nullptr, &count, nullptr);
+    std::vector<VkExtensionProperties> availableExtensions(count);
+    vkEnumerateDeviceExtensionProperties(dev, nullptr, &count, availableExtensions.data());
+    std::set<std::string> requestedExtensions(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end());
+    for (const auto ext: availableExtensions) requestedExtensions.erase(ext.extensionName);
+
+    QueueFamilies _queueFamilies = getQueueFamilies(dev); // all queue families that are available on this device
+    SurfaceDetails _surfaceDetails = getSurfaceDetails(dev); // surface details that this device supports
 
     return features.geometryShader == VK_TRUE &&
         props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+        requestedExtensions.empty() &&
         _queueFamilies.isComplete() &&
         !_surfaceDetails.formats.empty() &&
         !_surfaceDetails.presentModes.empty();
@@ -159,6 +153,7 @@ QueueFamilies Engine::getQueueFamilies(VkPhysicalDevice dev) {
         if (_queueFamilies.isComplete()) {
             break;
         }
+        i++;
     }
     return _queueFamilies;
 }
@@ -189,7 +184,7 @@ void Engine::createSwapchain() {
     
     uint32_t families[] = {queueFamilies.graphicsFamily.value(), queueFamilies.presentFamily.value()};
     if (queueFamilies.graphicsFamily.value() == queueFamilies.presentFamily.value()) {
-        swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; // swapchain images are not shared among different queues
         swapchainInfo.queueFamilyIndexCount = 1;
     } else {
         swapchainInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
@@ -238,7 +233,7 @@ VkPresentModeKHR Engine::choosePresentMode(std::vector<VkPresentModeKHR> present
 VkExtent2D Engine::chooseSurfaceExtent(VkSurfaceCapabilitiesKHR cap) {
     if (cap.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return cap.currentExtent;
-    } else {
+    } else { // means the device allows us to specify any extent
         int width, height;
         glfwGetFramebufferSize(window, &width, &height);
         VkExtent2D actualExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
