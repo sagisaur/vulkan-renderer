@@ -28,49 +28,60 @@ Engine::~Engine() {
 }
 void Engine::run() {
     VkCommandPool gfxCommandPool = createCommandPool(queueFamilies.graphicsFamily.value(), VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-    VkCommandBuffer gfxCommandBuffer = createCommandBuffer(gfxCommandPool);
-    VkSemaphore imageAvailable = createSemaphore();
-    VkSemaphore renderDone = createSemaphore();
-    VkFence cmdBufferReady = createFence();
+    std::vector<VkCommandBuffer> gfxCommandBuffers(MAX_FRAMES_IN_FLIGHT);
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) gfxCommandBuffers[i] = createCommandBuffer(gfxCommandPool);
+    std::vector<VkSemaphore> imageAvailable(MAX_FRAMES_IN_FLIGHT);
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) imageAvailable[i] = createSemaphore();
+    std::vector<VkSemaphore> renderDone(MAX_FRAMES_IN_FLIGHT);
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) renderDone[i] = createSemaphore();
+    std::vector<VkFence> cmdBufferReady(MAX_FRAMES_IN_FLIGHT);
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) cmdBufferReady[i] = createFence();
+    
+    uint32_t currFrame = 0;
+    
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
         // wait until this command buffer is ready to be rerecorded
-        vkWaitForFences(device, 1, &cmdBufferReady, VK_TRUE, ~0ull);
-        vkResetFences(device, 1, &cmdBufferReady);
+        vkWaitForFences(device, 1, &cmdBufferReady[currFrame], VK_TRUE, ~0ull);
+        vkResetFences(device, 1, &cmdBufferReady[currFrame]);
         
         // acquire free image from swapchain
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(device, swapchain, ~0ull, imageAvailable, VK_NULL_HANDLE, &imageIndex);
+        vkAcquireNextImageKHR(device, swapchain, ~0ull, imageAvailable[currFrame], VK_NULL_HANDLE, &imageIndex);
         
-        vkResetCommandBuffer(gfxCommandBuffer, 0);
-        recordCommandBuffer(gfxCommandBuffer, imageIndex);
+        vkResetCommandBuffer(gfxCommandBuffers[currFrame], 0);
+        recordCommandBuffer(gfxCommandBuffers[currFrame], imageIndex);
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &gfxCommandBuffer;
+        submitInfo.pCommandBuffers = &gfxCommandBuffers[currFrame];
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &renderDone;
+        submitInfo.pSignalSemaphores = &renderDone[currFrame];
         submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &imageAvailable;
+        submitInfo.pWaitSemaphores = &imageAvailable[currFrame];
         VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
         submitInfo.pWaitDstStageMask = waitStages;
-        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, cmdBufferReady));
+        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, cmdBufferReady[currFrame]));
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &renderDone;
+        presentInfo.pWaitSemaphores = &renderDone[currFrame];
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = &swapchain;
         presentInfo.pImageIndices = &imageIndex;
         vkQueuePresentKHR(graphicsQueue, &presentInfo);
+
+        currFrame = (currFrame+1)%MAX_FRAMES_IN_FLIGHT;
     }
     vkQueueWaitIdle(graphicsQueue);
     vkDestroyCommandPool(device, gfxCommandPool, nullptr);
-    vkDestroyFence(device, cmdBufferReady, nullptr);
-    vkDestroySemaphore(device, imageAvailable, nullptr);
-    vkDestroySemaphore(device, renderDone, nullptr);
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
+        vkDestroyFence(device, cmdBufferReady[i], nullptr);
+        vkDestroySemaphore(device, imageAvailable[i], nullptr);
+        vkDestroySemaphore(device, renderDone[i], nullptr);
+    }
 }
 void Engine::createWindow() {
     glfwInit();

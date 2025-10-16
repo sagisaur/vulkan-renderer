@@ -58,4 +58,6 @@ private:
     std::vector<const char*> requiredDeviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
+
+    const int MAX_FRAMES_IN_FLIGHT = 3;
 };
