@@ -7,11 +7,40 @@
 #include <limits>
 #include <algorithm>
 #include <fstream>
+#include <array>
+
+#include <glm/glm.hpp>
 
 #include <vulkan/vulkan.hpp>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+
+struct Vertex {
+    glm::vec2 pos;
+    glm::vec3 color;
+    static VkVertexInputBindingDescription getBindingDescription() {
+        VkVertexInputBindingDescription bindingDescription{};
+        // index of binding in the binding array
+        bindingDescription.binding = 0; // would be a different value if the data was packed in different arrays
+        bindingDescription.stride = sizeof(Vertex); // number of bytes between vertices
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // input rate (instance vs vertex)
+        return bindingDescription;
+    }
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescription() {
+        std::array<VkVertexInputAttributeDescription, 2> attributes{};
+        attributes[0].binding = 0; // which binding this attribute belongs to
+        attributes[0].location = 0; // location from vertex shader
+        attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributes[0].offset = offsetof(Vertex, pos);
+        attributes[1].binding = 0; 
+        attributes[1].location = 1;
+        attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributes[1].offset = offsetof(Vertex, color);
+
+        return attributes;
+    }
+};
 
 struct QueueFamilies {
     std::optional<uint32_t> graphicsFamily;

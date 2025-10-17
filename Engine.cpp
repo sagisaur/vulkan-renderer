@@ -8,8 +8,11 @@ Engine::Engine() {
     createRenderpass();
     createGraphicsPipeline();
     createFramebuffers();
+    createVertexBuffer();
 }
 Engine::~Engine() {
+    vkFreeMemory(device, vertexBufferMemory, nullptr);
+    vkDestroyBuffer(device, vertexBuffer, nullptr);
     cleanupSwapchain();
     vkDestroyPipeline(device, gfxPipeline, nullptr);
     vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
@@ -293,10 +296,12 @@ void Engine::createGraphicsPipeline() {
     // how to treat incoming data
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputInfo.pVertexAttributeDescriptions = nullptr;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.pVertexBindingDescriptions = nullptr;
+    auto bindingDescription = Vertex::getBindingDescription();
+    auto attributeDescription = Vertex::getAttributeDescription();
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = attributeDescription.size();
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescription.data();
 
     // how to assemble vertex shader output
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo{};
@@ -470,6 +475,10 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
         vkCmdBeginRenderPass(cmdBuffer, &renderpassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         {
             vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipeline);
+
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
+
             VkViewport viewport{};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
@@ -483,7 +492,7 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
             scissor.offset = {0, 0};
             vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-            vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
+            vkCmdDraw(cmdBuffer, vertices.size(), 1, 0, 0);
         }
         vkCmdEndRenderPass(cmdBuffer);
     }
@@ -498,6 +507,29 @@ void Engine::cleanupSwapchain() {
         vkDestroyImageView(device, imageView, nullptr);
     }
     vkDestroySwapchainKHR(device, swapchain, nullptr);
+}
+void Engine::createVertexBuffer() {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = sizeof(vertices[0])*vertices.size();
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VK_CHECK(vkCreateBuffer(device, &bufferInfo, nullptr, &vertexBuffer));
+
+    VkMemoryRequirements memReq; // buffer's memory requirements, i.e size, alignment, memory type
+    vkGetBufferMemoryRequirements(device, vertexBuffer, &memReq);
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memReq.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VK_CHECK(vkAllocateMemory(device, &allocInfo, nullptr, &vertexBufferMemory));
+
+    vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
+
+    void* data;
+    vkMapMemory(device, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+    memcpy(data, vertices.data(), bufferInfo.size);
+    vkUnmapMemory(device, vertexBufferMemory);
 }
 void Engine::recreateSwapchain() {
     vkDeviceWaitIdle(device);
@@ -617,4 +649,26 @@ VkSemaphore Engine::createSemaphore() {
     VkSemaphore sem;
     VK_CHECK(vkCreateSemaphore(device, &info, nullptr, &sem));
     return sem;
+}
+uint32_t Engine::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+    // memory heaps are distinct memory resources like VRAM or swap space in RAM in case memory spills from VRAM,
+    // different types of memory exist within those heaps
+    /*
+    typedef struct VkPhysicalDeviceMemoryProperties {
+        uint32_t        memoryTypeCount;
+        VkMemoryType    memoryTypes[VK_MAX_MEMORY_TYPES];
+        uint32_t        memoryHeapCount;
+        VkMemoryHeap    memoryHeaps[VK_MAX_MEMORY_HEAPS];
+    } VkPhysicalDeviceMemoryProperties;
+    */
+    // here we only care about type of memory, not what heap it comes from
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(pDevice, &memProperties); // get memory types and heaps
+    for (uint32_t i = 0; i<memProperties.memoryTypeCount; i++) { // iterate over all available memory types
+        if ((typeFilter & (1<<i)) && // typeFilter specifies the bit field of memory types that are suitable
+            ((memProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
+            return i; // index of the suitable memory type
+        }
+    }
+    throw std::runtime_error("Error: no suitable memory type");
 }

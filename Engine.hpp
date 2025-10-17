@@ -1,6 +1,12 @@
 #pragma once
 #include "config.hpp"
 
+const std::vector<Vertex> vertices = {
+    {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
+
 class Engine {
 public:
     Engine();
@@ -18,6 +24,7 @@ private:
     void recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex);
     void recreateSwapchain();
     void cleanupSwapchain();
+    void createVertexBuffer();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -36,6 +43,8 @@ private:
     VkPipelineLayout gfxPipelineLayout;
     VkRenderPass renderpass;
     std::vector<VkFramebuffer> swapchainFramebuffers;
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
 
     bool isDeviceSuitable(VkPhysicalDevice dev);
     QueueFamilies getQueueFamilies(VkPhysicalDevice dev);
@@ -49,6 +58,7 @@ private:
     VkCommandBuffer createCommandBuffer(VkCommandPool cmdPool);
     VkFence createFence();
     VkSemaphore createSemaphore();
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
