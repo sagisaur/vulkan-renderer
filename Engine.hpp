@@ -34,6 +34,7 @@ private:
     VkSurfaceKHR surface;
     VkQueue graphicsQueue;
     VkQueue presentQueue;
+    VkQueue transferQueue;
     VkSwapchainKHR swapchain;
     VkFormat swapchainFormat;
     VkExtent2D swapchainExtent;
@@ -56,9 +57,12 @@ private:
     VkShaderModule createShaderModule(std::vector<char> code);
     VkCommandPool createCommandPool(uint32_t queueFamily, VkCommandPoolCreateFlagBits flags);
     VkCommandBuffer createCommandBuffer(VkCommandPool cmdPool);
-    VkFence createFence();
+    VkFence createFence(VkFenceCreateFlags flags);
     VkSemaphore createSemaphore();
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    void createBuffer(VkBuffer& buffer, VkDeviceMemory& memory, VkBufferUsageFlags usage, 
+        VkDeviceSize size, VkMemoryPropertyFlags properties);
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
