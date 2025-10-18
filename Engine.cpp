@@ -9,8 +9,11 @@ Engine::Engine() {
     createGraphicsPipeline();
     createFramebuffers();
     createVertexBuffer();
+    createIndexBuffer();
 }
 Engine::~Engine() {
+    vkFreeMemory(device, indexBufferMemory, nullptr);
+    vkDestroyBuffer(device, indexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     cleanupSwapchain();
@@ -482,6 +485,7 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
 
             VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
+            vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
             VkViewport viewport{};
             viewport.x = 0.0f;
@@ -496,7 +500,8 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
             scissor.offset = {0, 0};
             vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-            vkCmdDraw(cmdBuffer, vertices.size(), 1, 0, 0);
+            // vkCmdDraw(cmdBuffer, vertices.size(), 1, 0, 0);
+            vkCmdDrawIndexed(cmdBuffer, indices.size(), 1, 0, 0, 0);
         }
         vkCmdEndRenderPass(cmdBuffer);
     }
@@ -531,6 +536,29 @@ void Engine::createVertexBuffer() {
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     copyBuffer(stagingBuffer, vertexBuffer, size);
+
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+}
+void Engine::createIndexBuffer() {
+    VkDeviceSize size = sizeof(indices[0])*indices.size();
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    // VK_MEMORY_PROPERTY_HOST_COHERENT_BIT here means GPU keeps track of writes to this buffer
+    // if the writes are done to cache or they are not done yet, GPU will take it into account
+    // without this flag we have to manually flush writes
+    createBuffer(stagingBuffer, stagingBufferMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, size, 
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    
+    void* data;
+    vkMapMemory(device, stagingBufferMemory, 0, size, 0, &data);
+    memcpy(data, indices.data(), size);
+    vkUnmapMemory(device, stagingBufferMemory);
+
+    createBuffer(indexBuffer, indexBufferMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, size, 
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    copyBuffer(stagingBuffer, indexBuffer, size);
 
     vkFreeMemory(device, stagingBufferMemory, nullptr);
     vkDestroyBuffer(device, stagingBuffer, nullptr);
