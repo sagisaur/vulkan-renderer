@@ -22,6 +22,7 @@ private:
     void createDevice();
     void createSurface();
     void createSwapchain();
+    void createDescriptorSetLayout();
     void createGraphicsPipeline();
     void createRenderpass();
     void createFramebuffers();
@@ -30,6 +31,10 @@ private:
     void cleanupSwapchain();
     void createVertexBuffer();
     void createIndexBuffer();
+    void createUniformBuffers();
+    void createDescriptorPool();
+    void createDesctiptorSets();
+    void updateUniformBuffers(uint32_t index);
 
     GLFWwindow* window;
     VkInstance instance;
@@ -45,6 +50,9 @@ private:
     VkExtent2D swapchainExtent;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorPool descriptorPool;
+    std::vector<VkDescriptorSet> descriptorSets;
     VkPipeline gfxPipeline;
     VkPipelineLayout gfxPipelineLayout;
     VkRenderPass renderpass;
@@ -53,6 +61,9 @@ private:
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
+    std::vector<VkBuffer> uniformBuffers;
+    std::vector<VkDeviceMemory> uniformBufferMemory;
+    std::vector<void*> uniformBufferMapped;
 
     bool isDeviceSuitable(VkPhysicalDevice dev);
     QueueFamilies getQueueFamilies(VkPhysicalDevice dev);

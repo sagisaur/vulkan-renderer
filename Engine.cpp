@@ -6,18 +6,28 @@ Engine::Engine() {
     createDevice();
     createSwapchain();
     createRenderpass();
+    createUniformBuffers();
+    createDescriptorSetLayout();
+    createDescriptorPool();
+    createDesctiptorSets();
     createGraphicsPipeline();
     createFramebuffers();
     createVertexBuffer();
     createIndexBuffer();
 }
 Engine::~Engine() {
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
+        vkFreeMemory(device, uniformBufferMemory[i], nullptr);
+        vkDestroyBuffer(device, uniformBuffers[i], nullptr);
+    }
     vkFreeMemory(device, indexBufferMemory, nullptr);
     vkDestroyBuffer(device, indexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     cleanupSwapchain();
     vkDestroyPipeline(device, gfxPipeline, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderpass, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -58,6 +68,7 @@ void Engine::run() {
         vkResetFences(device, 1, &cmdBufferReady[currFrame]);
         vkResetCommandBuffer(gfxCommandBuffers[currFrame], 0);
         recordCommandBuffer(gfxCommandBuffers[currFrame], imageIndex);
+        updateUniformBuffers(currFrame);
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
@@ -281,6 +292,22 @@ void Engine::createSwapchain() {
         createImageView(swapchainImages[i], swapchainImageViews[i], swapchainFormat, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 }
+void Engine::createDescriptorSetLayout() {
+    // describes the descriptor set to be bounded
+    VkDescriptorSetLayoutBinding layoutBinding{};
+    layoutBinding.binding = 0; // referenced in the shader
+    layoutBinding.descriptorCount = 1; // it is possible for a shader variable to represent an array of UBOs
+    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    layoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    layoutBinding.pImmutableSamplers = nullptr;
+
+    // tells the pipeline what kind of descriptor sets to expect
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
+    descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutInfo.bindingCount = 1;
+    descriptorSetLayoutInfo.pBindings = &layoutBinding;
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &descriptorSetLayout));
+}
 void Engine::createGraphicsPipeline() {
     auto vertCode = readFile("../shader.vert.spv");
     auto fragCode = readFile("../shader.frag.spv");
@@ -348,7 +375,7 @@ void Engine::createGraphicsPipeline() {
     rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
     rasterInfo.lineWidth = 1.0f;
     rasterInfo.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterInfo.depthBiasEnable = VK_FALSE;
 
     // multisampling
@@ -371,8 +398,8 @@ void Engine::createGraphicsPipeline() {
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pSetLayouts = nullptr;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &gfxPipelineLayout));
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -487,6 +514,8 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
             vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
             vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
+            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, &descriptorSets[imageIndex], 0, nullptr);
+
             VkViewport viewport{};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
@@ -562,6 +591,74 @@ void Engine::createIndexBuffer() {
 
     vkFreeMemory(device, stagingBufferMemory, nullptr);
     vkDestroyBuffer(device, stagingBuffer, nullptr);
+}
+void Engine::createUniformBuffers() {
+    VkDeviceSize size = sizeof(UniformBufferObject);
+    uniformBufferMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    uniformBufferMemory.resize(MAX_FRAMES_IN_FLIGHT);
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
+        createBuffer(uniformBuffers[i], uniformBufferMemory[i], VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, size, 
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        // persistent mapping since values are updated every frame
+        vkMapMemory(device, uniformBufferMemory[i], 0, size, 0, &uniformBufferMapped[i]);
+    }
+}
+void Engine::createDescriptorPool() {
+    // this describes only one descriptor type pool
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = MAX_FRAMES_IN_FLIGHT; // how many descriptors of this type to create
+    
+    // descriptor sets must be allocated from a descriptor pool
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT; // max number of descriptor sets allocated from this pool
+
+    VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool));
+}
+void Engine::createDesctiptorSets() {
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+    VkDescriptorSetAllocateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    info.descriptorPool = descriptorPool;
+    info.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    info.pSetLayouts = layouts.data(); // must be supplied for each descriptor set
+    descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    VK_CHECK(vkAllocateDescriptorSets(device, &info, descriptorSets.data()));
+    // configuration of the descriptor sets
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = uniformBuffers[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject); 
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = descriptorSets[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0; // in case the descriptor set is an array
+        descriptorWrite.descriptorCount = 1; // in case we want to update multiple descriptor sets at once
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrite.pBufferInfo = &bufferInfo;
+        descriptorWrite.pImageInfo = nullptr;
+        descriptorWrite.pTexelBufferView = nullptr;
+        vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+    }
+}
+void Engine::updateUniformBuffers(uint32_t index) {
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+    UniformBufferObject ubo{};
+    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float) swapchainExtent.height, 0.1f, 10.0f);
+    ubo.proj[1][1] *= -1;
+    memcpy(uniformBufferMapped[index], &ubo, sizeof(UniformBufferObject));
 }
 void Engine::recreateSwapchain() {
     vkDeviceWaitIdle(device);

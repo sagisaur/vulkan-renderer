@@ -9,7 +9,10 @@
 #include <fstream>
 #include <array>
 
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 
 #include <vulkan/vulkan.hpp>
 
@@ -54,6 +57,11 @@ struct SurfaceDetails {
     VkSurfaceCapabilitiesKHR cap;
     std::vector<VkPresentModeKHR> presentModes;
     std::vector<VkSurfaceFormatKHR> formats;
+};
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
 };
 
 #define VK_CHECK(x) vk_check_result((x), #x, __FILE__, __LINE__)
