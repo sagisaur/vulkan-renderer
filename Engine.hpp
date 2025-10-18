@@ -2,10 +2,10 @@
 #include "config.hpp"
 
 const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0
@@ -35,6 +35,8 @@ private:
     void createDescriptorPool();
     void createDesctiptorSets();
     void updateUniformBuffers(uint32_t index);
+    void createTextureImage();
+    void createTextureSampler();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -64,6 +66,10 @@ private:
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBufferMemory;
     std::vector<void*> uniformBufferMapped;
+    VkImage textureImage;
+    VkDeviceMemory textureImageMemory;
+    VkImageView textureImageView;
+    VkSampler textureSampler;
 
     bool isDeviceSuitable(VkPhysicalDevice dev);
     QueueFamilies getQueueFamilies(VkPhysicalDevice dev);
@@ -81,6 +87,10 @@ private:
     void createBuffer(VkBuffer& buffer, VkDeviceMemory& memory, VkBufferUsageFlags usage, 
         VkDeviceSize size, VkMemoryPropertyFlags properties);
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+    void createImage(VkImage& image, VkDeviceMemory& imageMemory, uint32_t width, uint32_t height, VkFormat format, 
+        VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperty);
+    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };

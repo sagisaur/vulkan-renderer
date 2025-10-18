@@ -19,9 +19,12 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "stb_image.h"
+
 struct Vertex {
     glm::vec2 pos;
     glm::vec3 color;
+    glm::vec2 texCoords;
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
         // index of binding in the binding array
@@ -30,8 +33,8 @@ struct Vertex {
         bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // input rate (instance vs vertex)
         return bindingDescription;
     }
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescription() {
-        std::array<VkVertexInputAttributeDescription, 2> attributes{};
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescription() {
+        std::array<VkVertexInputAttributeDescription, 3> attributes{};
         attributes[0].binding = 0; // which binding this attribute belongs to
         attributes[0].location = 0; // location from vertex shader
         attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
@@ -40,6 +43,10 @@ struct Vertex {
         attributes[1].location = 1;
         attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributes[1].offset = offsetof(Vertex, color);
+        attributes[2].binding = 0; 
+        attributes[2].location = 2;
+        attributes[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attributes[2].offset = offsetof(Vertex, texCoords);
 
         return attributes;
     }
