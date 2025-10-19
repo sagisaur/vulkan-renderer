@@ -27,13 +27,13 @@
 #include <GLFW/glfw3.h>
 
 struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoords;
+    float x, y, z;
+    uint8_t nx, ny, nz, nw;
+    float tx, ty;
     bool operator==(const Vertex& other) const {
-        return pos == other.pos && 
-            color == other.color &&
-            texCoords == other.texCoords;
+        return x == other.x && y == other.y && z == other.z && 
+            nx == other.nx && ny == other.ny && nz == other.nz &&
+            tx == other.tx && ty == other.ty;
     }
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -48,15 +48,15 @@ struct Vertex {
         attributes[0].binding = 0; // which binding this attribute belongs to
         attributes[0].location = 0; // location from vertex shader
         attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributes[0].offset = offsetof(Vertex, pos);
+        attributes[0].offset = offsetof(Vertex, x);
         attributes[1].binding = 0; 
         attributes[1].location = 1;
-        attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributes[1].offset = offsetof(Vertex, color);
+        attributes[1].format = VK_FORMAT_R8G8B8_UINT;
+        attributes[1].offset = offsetof(Vertex, nx);
         attributes[2].binding = 0; 
         attributes[2].location = 2;
         attributes[2].format = VK_FORMAT_R32G32_SFLOAT;
-        attributes[2].offset = offsetof(Vertex, texCoords);
+        attributes[2].offset = offsetof(Vertex, tx);
 
         return attributes;
     }
@@ -64,9 +64,9 @@ struct Vertex {
 namespace std {
     template<> struct hash<Vertex> {
         size_t operator()(Vertex const& vertex) const {
-            return ((hash<glm::vec3>()(vertex.pos) ^
-                   (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
-                   (hash<glm::vec2>()(vertex.texCoords) << 1);
+            return ((hash<glm::vec3>()(glm::vec3(vertex.x, vertex.y, vertex.z)) ^
+                   (hash<glm::vec3>()(glm::vec3(vertex.nx, vertex.ny, vertex.nz)) << 1)) >> 1) ^
+                   (hash<glm::vec2>()(glm::vec2(vertex.tx, vertex.ty)) << 1);
         }
     };
 }

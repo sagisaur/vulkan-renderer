@@ -131,16 +131,21 @@ void Engine::loadModel() {
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
             Vertex vertex{};
-            vertex.pos = {
-                attrib.vertices[3 * index.vertex_index + 0],
-                attrib.vertices[3 * index.vertex_index + 1],
-                attrib.vertices[3 * index.vertex_index + 2]
+            vertex.x = attrib.vertices[3 * index.vertex_index + 0];
+            vertex.y = attrib.vertices[3 * index.vertex_index + 1];
+            vertex.z = attrib.vertices[3 * index.vertex_index + 2];
+            vertex.tx = attrib.texcoords[2 * index.texcoord_index + 0];
+            vertex.ty = 1.0f - attrib.texcoords[2 * index.texcoord_index + 1];
+            glm::vec3 normal = {
+                attrib.normals[3 * index.normal_index + 0],
+                attrib.normals[3 * index.normal_index + 1],
+                attrib.normals[3 * index.normal_index + 2],
             };
-            vertex.texCoords = {
-                attrib.texcoords[2 * index.texcoord_index + 0],
-                1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-            };
-            vertex.color = {1.0f, 1.0f, 1.0f};
+            normal = glm::normalize(normal);
+            // input float is [-1.0, 1.0], we need to convert it to [0, 255] to fit into uint8_t
+            vertex.nx = uint8_t((normal.x*0.5f+0.5f)*255.0f);
+            vertex.ny = uint8_t((normal.y*0.5f+0.5f)*255.0f);
+            vertex.nz = uint8_t((normal.z*0.5f+0.5f)*255.0f);
             if (uniqueVertices.count(vertex) == 0) {
                 uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
                 vertices.push_back(vertex);
@@ -213,11 +218,17 @@ void Engine::createDevice() {
     deviceInfo.enabledExtensionCount = requiredDeviceExtensions.size();
     deviceInfo.ppEnabledExtensionNames = requiredDeviceExtensions.data();
 
-    VkPhysicalDeviceFeatures features{};
-    features.geometryShader = VK_TRUE;
-    features.samplerAnisotropy = VK_TRUE;
-    features.sampleRateShading = VK_TRUE;
-    deviceInfo.pEnabledFeatures = &features;
+    VkPhysicalDeviceFeatures2 features{};
+    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features.features.geometryShader = VK_TRUE;
+    features.features.samplerAnisotropy = VK_TRUE;
+    features.features.sampleRateShading = VK_TRUE;
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.shaderInt8 = VK_TRUE;
+    features12.storageBuffer8BitAccess = VK_TRUE;
+    features.pNext = &features12;
+    deviceInfo.pNext = &features;
 
     std::set<uint32_t> uniqueFamilies = {
         queueFamilies.graphicsFamily.value(), queueFamilies.presentFamily.value(), queueFamilies.transferFamily.value()
@@ -365,6 +376,7 @@ void Engine::createDescriptorSetLayout() {
     vertexLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     vertexLayoutBinding.pImmutableSamplers = nullptr;
 
+    // this should be a separate set as we are supplying a flag for push descriptors
     VkDescriptorSetLayoutBinding pushBindings[] = {vertexLayoutBinding};
 
     // tells the pipeline what kind of descriptor sets to expect

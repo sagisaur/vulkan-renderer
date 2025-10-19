@@ -1,4 +1,7 @@
 #version 450
+#extension GL_EXT_shader_16bit_storage: require
+#extension GL_EXT_shader_8bit_storage: require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8: require
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
@@ -7,7 +10,7 @@ layout(binding = 0) uniform UniformBufferObject {
 } ubo;
 struct Vertex {
 	float vx, vy, vz;
-	float nx, ny, nz;
+	uint8_t nx, ny, nz, nw; // nw is only for alignment
 	float tu, tv;
 };
 layout (set = 1, binding = 0) readonly buffer Vertices {
@@ -20,7 +23,7 @@ layout(location = 1) out vec2 fragTexCoords;
 void main() {
     Vertex v = vertices[gl_VertexIndex];
     vec3 inPosition = vec3(v.vx, v.vy, v.vz);
-    vec3 inNormal = vec3(v.nx, v.ny, v.nz);
+    vec3 inNormal = vec3(v.nx, v.ny, v.nz) / 255.0 * 2.0 - 1.0; // convert it from [0, 255] to [-1.0f, 1.0f]
     vec2 inTexCoords = vec2(v.tu, v.tv);
 
     gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
