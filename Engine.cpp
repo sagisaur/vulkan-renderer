@@ -20,9 +20,7 @@ Engine::Engine() {
     createIndexBuffer();
 }
 Engine::~Engine() {
-    vkDestroyImageView(device, depthImageView, nullptr);
-    vkDestroyImage(device, depthImage, nullptr);
-    vkFreeMemory(device, depthImageMemory, nullptr);
+    cleanupSwapchain();
     vkDestroySampler(device, textureSampler, nullptr);
     vkDestroyImageView(device, textureImageView, nullptr);
     vkFreeMemory(device, textureImageMemory, nullptr);
@@ -35,7 +33,6 @@ Engine::~Engine() {
     vkDestroyBuffer(device, indexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkDestroyBuffer(device, vertexBuffer, nullptr);
-    cleanupSwapchain();
     vkDestroyPipeline(device, gfxPipeline, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
@@ -588,6 +585,9 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
 
 }
 void Engine::cleanupSwapchain() {
+    vkDestroyImageView(device, depthImageView, nullptr);
+    vkDestroyImage(device, depthImage, nullptr);
+    vkFreeMemory(device, depthImageMemory, nullptr);
     for (auto framebuffer: swapchainFramebuffers) {
         vkDestroyFramebuffer(device, framebuffer, nullptr);
     }
@@ -801,6 +801,7 @@ void Engine::recreateSwapchain() {
     cleanupSwapchain();
 
     createSwapchain();
+    createDepthResources();
     createFramebuffers();
 }
 
