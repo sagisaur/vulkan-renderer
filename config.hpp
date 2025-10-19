@@ -8,9 +8,15 @@
 #include <algorithm>
 #include <fstream>
 #include <array>
+#include <unordered_map>
+
+#include "tiny_obj_loader.h"
+#include "stb_image.h"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
@@ -20,12 +26,15 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include "stb_image.h"
-
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
     glm::vec2 texCoords;
+    bool operator==(const Vertex& other) const {
+        return pos == other.pos && 
+            color == other.color &&
+            texCoords == other.texCoords;
+    }
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
         // index of binding in the binding array
@@ -52,6 +61,15 @@ struct Vertex {
         return attributes;
     }
 };
+namespace std {
+    template<> struct hash<Vertex> {
+        size_t operator()(Vertex const& vertex) const {
+            return ((hash<glm::vec3>()(vertex.pos) ^
+                   (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+                   (hash<glm::vec2>()(vertex.texCoords) << 1);
+        }
+    };
+}
 
 struct QueueFamilies {
     std::optional<uint32_t> graphicsFamily;

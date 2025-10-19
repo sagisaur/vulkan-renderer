@@ -1,28 +1,13 @@
 #pragma once
 #include "config.hpp"
 
-const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-};
-const std::vector<uint16_t> indices = {
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4
-};
-
 class Engine {
 public:
     Engine();
     ~Engine();
     void run();
 private:
+    void loadModel();
     void createWindow();
     void createInstance();
     void createDevice();
@@ -82,6 +67,9 @@ private:
     VkImageView depthImageView;
     VkFormat depthFormat;
 
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+
     bool isDeviceSuitable(VkPhysicalDevice dev);
     QueueFamilies getQueueFamilies(VkPhysicalDevice dev);
     SurfaceDetails getSurfaceDetails(VkPhysicalDevice dev);
@@ -114,4 +102,6 @@ private:
     };
 
     const int MAX_FRAMES_IN_FLIGHT = 3;
+    const std::string MODEL_PATH = "../viking_room.obj";
+    const std::string TEXTURE_PATH = "../viking_room.png";
 };

@@ -1,6 +1,8 @@
 #define STB_IMAGE_IMPLEMENTATION
+#define TINYOBJLOADER_IMPLEMENTATION
 #include "Engine.hpp"
 Engine::Engine() {
+    loadModel();
     createWindow();
     createInstance();
     createSurface();
@@ -112,6 +114,37 @@ void Engine::run() {
         vkDestroyFence(device, cmdBufferReady[i], nullptr);
         vkDestroySemaphore(device, imageAvailable[i], nullptr);
         vkDestroySemaphore(device, renderDone[i], nullptr);
+    }
+}
+void Engine::loadModel() {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string err;
+    std::string warn;
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str(), nullptr)) {
+        throw std::runtime_error(err);
+    }
+    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+    for (const auto& shape : shapes) {
+        for (const auto& index : shape.mesh.indices) {
+            Vertex vertex{};
+            vertex.pos = {
+                attrib.vertices[3 * index.vertex_index + 0],
+                attrib.vertices[3 * index.vertex_index + 1],
+                attrib.vertices[3 * index.vertex_index + 2]
+            };
+            vertex.texCoords = {
+                attrib.texcoords[2 * index.texcoord_index + 0],
+                1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+            };
+            vertex.color = {1.0f, 1.0f, 1.0f};
+            if (uniqueVertices.count(vertex) == 0) {
+                uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+                vertices.push_back(vertex);
+            }
+            indices.push_back(uniqueVertices[vertex]);
+        }
     }
 }
 void Engine::createWindow() {
@@ -559,7 +592,7 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
 
             VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
-            vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
             vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, &descriptorSets[imageIndex], 0, nullptr);
 
@@ -731,7 +764,7 @@ void Engine::updateUniformBuffers(uint32_t index) {
 }
 void Engine::createTextureImage() {
     int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load("../texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
     VkDeviceSize size = texWidth*texHeight*4; // 4 bytes in total, 1 byte per channel
     if (!pixels) throw std::runtime_error("Error: cannot read the texture file");
 
