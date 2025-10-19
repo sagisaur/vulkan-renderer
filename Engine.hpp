@@ -29,6 +29,7 @@ private:
     void createTextureImage();
     void createTextureSampler();
     void createDepthResources();
+    void createColorResources();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -58,6 +59,9 @@ private:
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBufferMemory;
     std::vector<void*> uniformBufferMapped;
+    VkImage colorImage;
+    VkDeviceMemory colorImageMemory;
+    VkImageView colorImageView;
     VkImage textureImage;
     VkDeviceMemory textureImageMemory;
     VkImageView textureImageView;
@@ -67,6 +71,7 @@ private:
     VkImageView depthImageView;
     VkFormat depthFormat;
     uint32_t mipLevels;
+    VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -88,10 +93,12 @@ private:
         VkDeviceSize size, VkMemoryPropertyFlags properties);
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
     void createImage(VkImage& image, VkDeviceMemory& imageMemory, uint32_t width, uint32_t height, VkFormat format, 
-        VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperty, uint32_t mipLevels);
+        VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperty, uint32_t mipLevels, 
+        VkSampleCountFlagBits samples);
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     void generateMipmaps(VkImage image, uint32_t texWidth, uint32_t texHeight, uint32_t mipLevels, VkFormat format);
+    VkSampleCountFlagBits getMaxSamples();
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
