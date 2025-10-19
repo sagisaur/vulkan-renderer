@@ -6,7 +6,9 @@ Engine::Engine() {
     createSurface();
     createDevice();
     createSwapchain();
+    createDepthResources();
     createRenderpass();
+    createFramebuffers();
     createUniformBuffers();
     createTextureImage();
     createTextureSampler();
@@ -14,11 +16,13 @@ Engine::Engine() {
     createDescriptorPool();
     createDesctiptorSets();
     createGraphicsPipeline();
-    createFramebuffers();
     createVertexBuffer();
     createIndexBuffer();
 }
 Engine::~Engine() {
+    vkDestroyImageView(device, depthImageView, nullptr);
+    vkDestroyImage(device, depthImage, nullptr);
+    vkFreeMemory(device, depthImageMemory, nullptr);
     vkDestroySampler(device, textureSampler, nullptr);
     vkDestroyImageView(device, textureImageView, nullptr);
     vkFreeMemory(device, textureImageMemory, nullptr);
@@ -420,6 +424,14 @@ void Engine::createGraphicsPipeline() {
     pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &gfxPipelineLayout));
 
+    VkPipelineDepthStencilStateCreateInfo depthInfo{};
+    depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthInfo.depthTestEnable = VK_TRUE;
+    depthInfo.depthWriteEnable = VK_TRUE;
+    depthInfo.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthInfo.depthBoundsTestEnable = VK_FALSE; // allows to keep fragments within a specific depth range
+    depthInfo.stencilTestEnable = VK_FALSE;
+
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = shaderStageInfos.size();
@@ -431,6 +443,7 @@ void Engine::createGraphicsPipeline() {
     pipelineInfo.pRasterizationState = &rasterInfo;
     pipelineInfo.pMultisampleState = &msaaInfo;
     pipelineInfo.pColorBlendState = &colorBlendInfo;
+    pipelineInfo.pDepthStencilState = &depthInfo;
     pipelineInfo.layout = gfxPipelineLayout;
     pipelineInfo.renderPass = renderpass;
     pipelineInfo.subpass = 0;
@@ -452,7 +465,17 @@ void Engine::createRenderpass() {
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 
-    VkAttachmentDescription attachments[] = {colorAttachment};
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = depthFormat;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+    VkAttachmentDescription attachments[] = {colorAttachment, depthAttachment};
 
     // each subpass references >=1 attachments from the array above
     VkAttachmentReference colorAttachmentRef{};
@@ -462,18 +485,26 @@ void Engine::createRenderpass() {
     // what layout we want this attachment to have once subpass starts
     colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // used as color buffer
 
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
     VkSubpassDependency dep{};
     dep.srcSubpass = VK_SUBPASS_EXTERNAL; // implicit subpass before or after the rendering pass
     dep.dstSubpass = 0; // current subpass, must be always bigger than srcSubpass
-    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dep.srcAccessMask = 0;
-    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | 
+        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT; // wait until writes are done to depth buffer
+    dep.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | 
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT; // we clear the depth buffer first
 
     VkRenderPassCreateInfo renderpassInfo{};
     renderpassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -488,7 +519,7 @@ void Engine::createRenderpass() {
 void Engine::createFramebuffers() {
     swapchainFramebuffers.resize(swapchainImages.size());
     for (int i=0; i<swapchainFramebuffers.size(); i++) {
-        VkImageView attachments[] = {swapchainImageViews[i]};
+        VkImageView attachments[] = {swapchainImageViews[i], depthImageView};
         
         VkFramebufferCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -517,8 +548,9 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
         renderpassBeginInfo.framebuffer = swapchainFramebuffers[imageIndex];
         renderpassBeginInfo.renderArea.offset = {0, 0};
         renderpassBeginInfo.renderArea.extent = swapchainExtent;
-        std::array<VkClearValue, 1> clearValues{};
+        std::array<VkClearValue, 2> clearValues{};
         clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        clearValues[1].depthStencil = {1.0f, 0};
         renderpassBeginInfo.clearValueCount = clearValues.size();
         renderpassBeginInfo.pClearValues = clearValues.data();
         // VK_SUBPASS_CONTENTS_INLINE: render pass commands will be embedded in the primary command buffer itself and no secondary
@@ -747,6 +779,21 @@ void Engine::createTextureSampler() {
     samplerInfo.minLod = 0.0f;
     samplerInfo.maxLod = 0.0f;
     VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler));
+}
+void Engine::createDepthResources() {
+    std::vector<VkFormat> availableDepthFormats = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
+    for (const auto format: availableDepthFormats) {
+        VkFormatProperties props{};
+        vkGetPhysicalDeviceFormatProperties(pDevice, format, &props);
+        if ((props.optimalTilingFeatures & 
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) == VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            depthFormat = format;
+            break;
+        }
+    }
+    createImage(depthImage, depthImageMemory, swapchainExtent.width, swapchainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, 
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    createImageView(depthImage, depthImageView, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 void Engine::recreateSwapchain() {
     vkDeviceWaitIdle(device);
@@ -986,7 +1033,14 @@ void Engine::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            if (format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT) {
+                barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+            }
+        } else {
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        }
         barrier.subresourceRange.baseArrayLayer = 0;
         barrier.subresourceRange.baseMipLevel = 0;
         barrier.subresourceRange.levelCount = 1;
@@ -1004,6 +1058,11 @@ void Engine::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout
             barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
             srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         }
 
         vkCmdPipelineBarrier(cmdBuffer, 

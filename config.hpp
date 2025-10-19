@@ -10,6 +10,7 @@
 #include <array>
 
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
@@ -22,7 +23,7 @@
 #include "stb_image.h"
 
 struct Vertex {
-    glm::vec2 pos;
+    glm::vec3 pos;
     glm::vec3 color;
     glm::vec2 texCoords;
     static VkVertexInputBindingDescription getBindingDescription() {
@@ -37,7 +38,7 @@ struct Vertex {
         std::array<VkVertexInputAttributeDescription, 3> attributes{};
         attributes[0].binding = 0; // which binding this attribute belongs to
         attributes[0].location = 0; // location from vertex shader
-        attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributes[0].offset = offsetof(Vertex, pos);
         attributes[1].binding = 0; 
         attributes[1].location = 1;
