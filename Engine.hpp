@@ -66,6 +66,7 @@ private:
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
     VkFormat depthFormat;
+    uint32_t mipLevels;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -76,7 +77,7 @@ private:
     VkSurfaceFormatKHR chooseSurfaceFormat(std::vector<VkSurfaceFormatKHR> formats);
     VkPresentModeKHR choosePresentMode(std::vector<VkPresentModeKHR> presentModes);
     VkExtent2D chooseSurfaceExtent(VkSurfaceCapabilitiesKHR cap);
-    void createImageView(VkImage image, VkImageView& imageView, VkFormat format, VkImageAspectFlags aspectMask);
+    void createImageView(VkImage image, VkImageView& imageView, VkFormat format, VkImageAspectFlags aspectMask, uint32_t mipLevels);
     VkShaderModule createShaderModule(std::vector<char> code);
     VkCommandPool createCommandPool(uint32_t queueFamily, VkCommandPoolCreateFlagBits flags);
     VkCommandBuffer createCommandBuffer(VkCommandPool cmdPool);
@@ -87,9 +88,10 @@ private:
         VkDeviceSize size, VkMemoryPropertyFlags properties);
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
     void createImage(VkImage& image, VkDeviceMemory& imageMemory, uint32_t width, uint32_t height, VkFormat format, 
-        VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperty);
-    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+        VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperty, uint32_t mipLevels);
+    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+    void generateMipmaps(VkImage image, uint32_t texWidth, uint32_t texHeight, uint32_t mipLevels, VkFormat format);
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
