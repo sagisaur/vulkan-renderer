@@ -46,6 +46,7 @@ private:
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
     VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorSetLayout pushDescriptorSetLayout;
     VkDescriptorPool descriptorPool;
     std::vector<VkDescriptorSet> descriptorSets;
     VkPipeline gfxPipeline;
@@ -55,6 +56,7 @@ private:
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
+    VkDeviceSize vertexBufferSize;
     VkDeviceMemory indexBufferMemory;
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBufferMemory;
@@ -107,7 +109,8 @@ private:
         "VK_KHR_xcb_surface"
     };
     std::vector<const char*> requiredDeviceExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME
     };
 
     const int MAX_FRAMES_IN_FLIGHT = 3;

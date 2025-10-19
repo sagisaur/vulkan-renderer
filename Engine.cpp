@@ -38,6 +38,7 @@ Engine::~Engine() {
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vkDestroyPipeline(device, gfxPipeline, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, pushDescriptorSetLayout, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderpass, nullptr);
@@ -357,12 +358,26 @@ void Engine::createDescriptorSetLayout() {
 
     VkDescriptorSetLayoutBinding bindings[] = {MVPLayoutBinding, samplerLayoutBinding};
 
+    VkDescriptorSetLayoutBinding vertexLayoutBinding{};
+    vertexLayoutBinding.binding = 0;
+    vertexLayoutBinding.descriptorCount = 1;
+    vertexLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    vertexLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    vertexLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding pushBindings[] = {vertexLayoutBinding};
+
     // tells the pipeline what kind of descriptor sets to expect
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
     descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     descriptorSetLayoutInfo.bindingCount = 2;
     descriptorSetLayoutInfo.pBindings = bindings;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &descriptorSetLayout));
+
+    descriptorSetLayoutInfo.bindingCount = 1;
+    descriptorSetLayoutInfo.pBindings = pushBindings;
+    descriptorSetLayoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &pushDescriptorSetLayout));
 }
 void Engine::createGraphicsPipeline() {
     auto vertCode = readFile("../shader.vert.spv");
@@ -388,10 +403,10 @@ void Engine::createGraphicsPipeline() {
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     auto bindingDescription = Vertex::getBindingDescription();
     auto attributeDescription = Vertex::getAttributeDescription();
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.vertexAttributeDescriptionCount = attributeDescription.size();
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescription.data();
+    // vertexInputInfo.vertexBindingDescriptionCount = 1;
+    // vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    // vertexInputInfo.vertexAttributeDescriptionCount = attributeDescription.size();
+    // vertexInputInfo.pVertexAttributeDescriptions = attributeDescription.data();
 
     // how to assemble vertex shader output
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo{};
@@ -455,8 +470,9 @@ void Engine::createGraphicsPipeline() {
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.pushConstantRangeCount = 0;
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutInfo.setLayoutCount = 2;
+    VkDescriptorSetLayout layouts[] = {descriptorSetLayout, pushDescriptorSetLayout};
+    pipelineLayoutInfo.pSetLayouts = layouts;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &gfxPipelineLayout));
 
     VkPipelineDepthStencilStateCreateInfo depthInfo{};
@@ -611,9 +627,26 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
         {
             vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipeline);
 
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
+            // VkDeviceSize offsets[] = {0};
+            // vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
             vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR = 
+                (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR");
+            if (!vkCmdPushDescriptorSetKHR) {
+                throw std::runtime_error("Failed to load vkCmdPushDescriptorSetKHR function");
+            }
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = vertexBuffer;
+            bufferInfo.offset = 0;
+            bufferInfo.range = vertexBufferSize;
+            VkWriteDescriptorSet writeDescriptorSet{};
+            writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSet.dstBinding = 0;
+            writeDescriptorSet.descriptorCount = 1;
+            writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writeDescriptorSet.dstArrayElement = 0;
+            writeDescriptorSet.pBufferInfo = &bufferInfo;
+            vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 1, 1, &writeDescriptorSet);
 
             vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, &descriptorSets[imageIndex], 0, nullptr);
 
@@ -654,24 +687,24 @@ void Engine::cleanupSwapchain() {
     vkDestroySwapchainKHR(device, swapchain, nullptr);
 }
 void Engine::createVertexBuffer() {
-    VkDeviceSize size = sizeof(vertices[0])*vertices.size();
+    vertexBufferSize = sizeof(vertices[0])*vertices.size();
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
     // VK_MEMORY_PROPERTY_HOST_COHERENT_BIT here means GPU keeps track of writes to this buffer
     // if the writes are done to cache or they are not done yet, GPU will take it into account
     // without this flag we have to manually flush writes
-    createBuffer(stagingBuffer, stagingBufferMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, size, 
+    createBuffer(stagingBuffer, stagingBufferMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vertexBufferSize, 
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     
     void* data;
-    vkMapMemory(device, stagingBufferMemory, 0, size, 0, &data);
-    memcpy(data, vertices.data(), size);
+    vkMapMemory(device, stagingBufferMemory, 0, vertexBufferSize, 0, &data);
+    memcpy(data, vertices.data(), vertexBufferSize);
     vkUnmapMemory(device, stagingBufferMemory);
 
-    createBuffer(vertexBuffer, vertexBufferMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, size, 
+    createBuffer(vertexBuffer, vertexBufferMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vertexBufferSize, 
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    copyBuffer(stagingBuffer, vertexBuffer, size);
+    copyBuffer(stagingBuffer, vertexBuffer, vertexBufferSize);
 
     vkFreeMemory(device, stagingBufferMemory, nullptr);
     vkDestroyBuffer(device, stagingBuffer, nullptr);
