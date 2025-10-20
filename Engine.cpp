@@ -21,8 +21,10 @@ Engine::Engine() {
     createGraphicsPipeline();
     createVertexBuffer();
     createIndexBuffer();
+    createQueryPool();
 }
 Engine::~Engine() {
+    vkDestroyQueryPool(device, queryPool, nullptr);
     cleanupSwapchain();
     vkDestroySampler(device, textureSampler, nullptr);
     vkDestroyImageView(device, textureImageView, nullptr);
@@ -59,8 +61,9 @@ void Engine::run() {
     std::vector<VkFence> cmdBufferReady(MAX_FRAMES_IN_FLIGHT);
     for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) cmdBufferReady[i] = createFence(VK_FENCE_CREATE_SIGNALED_BIT);
     
+    double lastTime = glfwGetTime();
     uint32_t currFrame = 0;
-    
+    int framesPassed = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
@@ -79,8 +82,9 @@ void Engine::run() {
         
         vkResetFences(device, 1, &cmdBufferReady[currFrame]);
         vkResetCommandBuffer(gfxCommandBuffers[currFrame], 0);
-        recordCommandBuffer(gfxCommandBuffers[currFrame], imageIndex);
-        updateUniformBuffers(currFrame);
+
+        recordCommandBuffer(gfxCommandBuffers[currFrame], imageIndex, currFrame);
+        
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
@@ -109,6 +113,47 @@ void Engine::run() {
         }
 
         currFrame = (currFrame+1)%MAX_FRAMES_IN_FLIGHT;
+
+        framesPassed++;
+        double currentTime = glfwGetTime();
+        double elapsed = currentTime - lastTime; 
+        uint32_t prevFrame = (currFrame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
+        VkResult result = vkGetQueryPoolResults(device, queryPool, prevFrame * 2, 2, 
+            sizeof(uint64_t) * 2, &queryResults[prevFrame * 2], sizeof(uint64_t), 
+            VK_QUERY_RESULT_64_BIT);
+            
+        if (result == VK_SUCCESS) {
+            uint64_t startTime = queryResults[prevFrame * 2];
+            uint64_t endTime = queryResults[prevFrame * 2 + 1];
+            
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties(pDevice, &props);
+            float timestampPeriod = props.limits.timestampPeriod;
+            
+            double gpuTimeMs = (endTime - startTime) * timestampPeriod / 1000000.0;
+            
+            gpuTimes.push_back(gpuTimeMs);
+            if (gpuTimes.size() > 30) {
+                gpuTimes.erase(gpuTimes.begin());
+            }
+            
+            double avgGpuTime = 0.0;
+            for (double time : gpuTimes) {
+                avgGpuTime += time;
+            }
+            avgGpuTime /= gpuTimes.size();
+            
+            if (elapsed >= 2.0) {
+                std::ostringstream title;
+                title << "CPU: " << std::fixed << std::setprecision(1) << framesPassed/elapsed 
+                    << " FPS, GPU: " << std::setprecision(3) << avgGpuTime 
+                    << "ms (avg " << gpuTimes.size() << " frames), "
+                    << "Triangles: " << indices.size()/3;
+                glfwSetWindowTitle(window, title.str().c_str());
+                framesPassed = 0;
+                lastTime = currentTime;
+            }
+        }
     }
     vkQueueWaitIdle(graphicsQueue);
     vkDestroyCommandPool(device, gfxCommandPool, nullptr);
@@ -131,11 +176,11 @@ void Engine::loadModel() {
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
             Vertex vertex{};
-            vertex.x = attrib.vertices[3 * index.vertex_index + 0];
-            vertex.y = attrib.vertices[3 * index.vertex_index + 1];
-            vertex.z = attrib.vertices[3 * index.vertex_index + 2];
-            vertex.tx = attrib.texcoords[2 * index.texcoord_index + 0];
-            vertex.ty = 1.0f - attrib.texcoords[2 * index.texcoord_index + 1];
+            vertex.x = floatToHalf(attrib.vertices[3 * index.vertex_index + 0]);
+            vertex.y = floatToHalf(attrib.vertices[3 * index.vertex_index + 1]);
+            vertex.z = floatToHalf(attrib.vertices[3 * index.vertex_index + 2]);
+            vertex.tx = floatToHalf(attrib.texcoords[2 * index.texcoord_index + 0]);
+            vertex.ty = floatToHalf(1.0f - attrib.texcoords[2 * index.texcoord_index + 1]);
             glm::vec3 normal = {
                 attrib.normals[3 * index.normal_index + 0],
                 attrib.normals[3 * index.normal_index + 1],
@@ -226,7 +271,12 @@ void Engine::createDevice() {
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     features12.shaderInt8 = VK_TRUE;
+    features12.shaderFloat16 = VK_TRUE;
     features12.storageBuffer8BitAccess = VK_TRUE;
+    VkPhysicalDevice16BitStorageFeatures features16{};
+    features16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
+    features16.storageBuffer16BitAccess = VK_TRUE;
+    features12.pNext = &features16;
     features.pNext = &features12;
     deviceInfo.pNext = &features;
 
@@ -611,7 +661,7 @@ void Engine::createFramebuffers() {
         VK_CHECK(vkCreateFramebuffer(device, &info, nullptr, &swapchainFramebuffers[i]));
     }
 }
-void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex) {
+void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex, uint32_t currFrame) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.pInheritanceInfo = nullptr; // which state to inherit from primary buffer, only relevant for seconday buffers
@@ -621,6 +671,9 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
     beginInfo.flags = 0;
     VK_CHECK(vkBeginCommandBuffer(cmdBuffer, &beginInfo));
     {
+        vkCmdResetQueryPool(cmdBuffer, queryPool, currFrame * 2, 2);
+        vkCmdWriteTimestamp(cmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currFrame * 2);
+
         VkRenderPassBeginInfo renderpassBeginInfo{};
         renderpassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderpassBeginInfo.renderPass = renderpass;
@@ -642,6 +695,22 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
             // VkDeviceSize offsets[] = {0};
             // vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
             vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = swapchainExtent.width;
+            viewport.height = swapchainExtent.height;
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
+            VkRect2D scissor{};
+            scissor.extent = swapchainExtent;
+            scissor.offset = {0, 0};
+            vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+
+            updateUniformBuffers(currFrame);
+
             PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR = 
                 (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR");
             if (!vkCmdPushDescriptorSetKHR) {
@@ -660,25 +729,13 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex)
             writeDescriptorSet.pBufferInfo = &bufferInfo;
             vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 1, 1, &writeDescriptorSet);
 
-            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, &descriptorSets[imageIndex], 0, nullptr);
-
-            VkViewport viewport{};
-            viewport.x = 0.0f;
-            viewport.y = 0.0f;
-            viewport.width = swapchainExtent.width;
-            viewport.height = swapchainExtent.height;
-            viewport.minDepth = 0.0f;
-            viewport.maxDepth = 1.0f;
-            vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
-            VkRect2D scissor{};
-            scissor.extent = swapchainExtent;
-            scissor.offset = {0, 0};
-            vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, &descriptorSets[currFrame], 0, nullptr);
 
             // vkCmdDraw(cmdBuffer, vertices.size(), 1, 0, 0);
             vkCmdDrawIndexed(cmdBuffer, indices.size(), 1, 0, 0, 0);
         }
         vkCmdEndRenderPass(cmdBuffer);
+        vkCmdWriteTimestamp(cmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currFrame * 2 + 1);
     }
     VK_CHECK(vkEndCommandBuffer(cmdBuffer));
 
@@ -937,6 +994,7 @@ VkSurfaceFormatKHR Engine::chooseSurfaceFormat(std::vector<VkSurfaceFormatKHR> f
     return formats[0];
 }
 VkPresentModeKHR Engine::choosePresentMode(std::vector<VkPresentModeKHR> presentModes) {
+    return VK_PRESENT_MODE_IMMEDIATE_KHR;
     for (const auto mode: presentModes) {
         if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
             return mode;
@@ -1351,4 +1409,13 @@ VkSampleCountFlagBits Engine::getMaxSamples() {
     if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
     if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
     return VK_SAMPLE_COUNT_1_BIT;
+}
+void Engine::createQueryPool() {
+    VkQueryPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    poolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    poolInfo.queryCount = MAX_FRAMES_IN_FLIGHT * 2;
+    VK_CHECK(vkCreateQueryPool(device, &poolInfo, nullptr, &queryPool));
+    
+    queryResults.resize(MAX_FRAMES_IN_FLIGHT * 2);
 }

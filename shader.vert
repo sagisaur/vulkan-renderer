@@ -1,19 +1,20 @@
-#version 450
-#extension GL_EXT_shader_16bit_storage: require
+#version 460
 #extension GL_EXT_shader_8bit_storage: require
-#extension GL_EXT_shader_explicit_arithmetic_types_int8: require
+#extension GL_EXT_shader_16bit_storage: require
+#extension GL_EXT_shader_explicit_arithmetic_types: require
 
-layout(binding = 0) uniform UniformBufferObject {
+layout(set = 0, binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view;
     mat4 proj;
 } ubo;
+
 struct Vertex {
-	float vx, vy, vz;
+	float16_t vx, vy, vz, vw; // vw is only for alignment
 	uint8_t nx, ny, nz, nw; // nw is only for alignment
-	float tu, tv;
+	float16_t tu, tv;
 };
-layout (set = 1, binding = 0) readonly buffer Vertices {
+layout(set = 1, binding = 0) readonly buffer Vertices {
     Vertex vertices[];
 };
 

@@ -17,7 +17,7 @@ private:
     void createGraphicsPipeline();
     void createRenderpass();
     void createFramebuffers();
-    void recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex);
+    void recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex, uint32_t currFrame);
     void recreateSwapchain();
     void cleanupSwapchain();
     void createVertexBuffer();
@@ -101,6 +101,7 @@ private:
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     void generateMipmaps(VkImage image, uint32_t texWidth, uint32_t texHeight, uint32_t mipLevels, VkFormat format);
     VkSampleCountFlagBits getMaxSamples();
+    void createQueryPool();
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
@@ -116,4 +117,7 @@ private:
     const int MAX_FRAMES_IN_FLIGHT = 3;
     const std::string MODEL_PATH = "../viking_room.obj";
     const std::string TEXTURE_PATH = "../viking_room.png";
+    VkQueryPool queryPool;
+    std::vector<uint64_t> queryResults;
+    std::vector<double> gpuTimes;
 };
