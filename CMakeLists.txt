@@ -15,6 +15,7 @@ set(SOURCES
 set(SHADER_FILES
     ../shader.vert
     ../shader.frag
+    ../shader.mesh
 )
 set(COMPILED_SHADERS "")
 

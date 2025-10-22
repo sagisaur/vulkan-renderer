@@ -10,6 +10,7 @@
 #include <array>
 #include <unordered_map>
 #include <iomanip>
+#include <unordered_set>
 
 #include "tiny_obj_loader.h"
 #include "stb_image.h"
@@ -71,6 +72,19 @@ namespace std {
         }
     };
 }
+
+struct Meshlet {
+    uint32_t vertices[64];
+    uint8_t indices[126*3];
+    uint8_t triangleCount;
+    uint8_t vertexCount; 
+};
+
+struct Mesh {
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    std::vector<Meshlet> meshlets;
+};
 
 struct QueueFamilies {
     std::optional<uint32_t> graphicsFamily;

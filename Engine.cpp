@@ -3,6 +3,7 @@
 #include "Engine.hpp"
 Engine::Engine() {
     loadModel();
+    createMeshlets();
     createWindow();
     createInstance();
     createSurface();
@@ -21,9 +22,12 @@ Engine::Engine() {
     createGraphicsPipeline();
     createVertexBuffer();
     createIndexBuffer();
+    createMeshletBuffer();
     createQueryPool();
 }
 Engine::~Engine() {
+    vkDestroyBuffer(device, meshletBuffer, nullptr);
+    vkFreeMemory(device, meshletBufferMemory, nullptr);
     vkDestroyQueryPool(device, queryPool, nullptr);
     cleanupSwapchain();
     vkDestroySampler(device, textureSampler, nullptr);
@@ -148,7 +152,8 @@ void Engine::run() {
                 title << "CPU: " << std::fixed << std::setprecision(1) << framesPassed/elapsed 
                     << " FPS, GPU: " << std::setprecision(3) << avgGpuTime 
                     << "ms (avg " << gpuTimes.size() << " frames), "
-                    << "Triangles: " << indices.size()/3;
+                    << "Triangles: " << mesh.indices.size()/3 <<", "
+                    << "Meshlets: " << mesh.meshlets.size();
                 glfwSetWindowTitle(window, title.str().c_str());
                 framesPassed = 0;
                 lastTime = currentTime;
@@ -192,11 +197,63 @@ void Engine::loadModel() {
             vertex.ny = uint8_t((normal.y*0.5f+0.5f)*255.0f);
             vertex.nz = uint8_t((normal.z*0.5f+0.5f)*255.0f);
             if (uniqueVertices.count(vertex) == 0) {
-                uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
-                vertices.push_back(vertex);
+                uniqueVertices[vertex] = static_cast<uint32_t>(mesh.vertices.size());
+                mesh.vertices.push_back(vertex);
             }
-            indices.push_back(uniqueVertices[vertex]);
+            mesh.indices.push_back(uniqueVertices[vertex]);
         }
+    }
+}
+void Engine::createMeshlets() {
+    const uint32_t MAX_VERTICES = 64;
+    const uint32_t MAX_TRIANGLES = 126;
+    uint32_t triangleCount = mesh.indices.size() / 3;
+    uint32_t currentTriangle = 0;
+    while (currentTriangle < triangleCount) {
+        Meshlet meshlet = {};
+        std::unordered_set<uint32_t> meshletVertexSet;
+        std::vector<uint32_t> meshletVertexList;
+        std::vector<uint8_t> meshletIndicesList;
+        uint32_t trianglesInMeshlet = 0;
+        while (currentTriangle < triangleCount && trianglesInMeshlet < MAX_TRIANGLES) {
+            uint32_t i0 = mesh.indices[currentTriangle * 3 + 0];
+            uint32_t i1 = mesh.indices[currentTriangle * 3 + 1];
+            uint32_t i2 = mesh.indices[currentTriangle * 3 + 2];
+            std::unordered_set<uint32_t> potentialVertices = meshletVertexSet;
+            potentialVertices.insert(i0);
+            potentialVertices.insert(i1);
+            potentialVertices.insert(i2);
+            if (potentialVertices.size() > MAX_VERTICES) {
+                break;
+            }
+            auto addVertex = [&](uint32_t globalIdx) -> uint8_t {
+                if (meshletVertexSet.find(globalIdx) == meshletVertexSet.end()) {
+                    meshletVertexSet.insert(globalIdx);
+                    meshletVertexList.push_back(globalIdx);
+                }
+                for (uint8_t i = 0; i < meshletVertexList.size(); i++) {
+                    if (meshletVertexList[i] == globalIdx) return i;
+                }
+                return 0;
+            };
+            uint8_t localI0 = addVertex(i0);
+            uint8_t localI1 = addVertex(i1);  
+            uint8_t localI2 = addVertex(i2);
+            meshletIndicesList.push_back(localI0);
+            meshletIndicesList.push_back(localI1);
+            meshletIndicesList.push_back(localI2);
+            trianglesInMeshlet++;
+            currentTriangle++;
+        }
+        meshlet.vertexCount = meshletVertexList.size();
+        meshlet.triangleCount = meshletIndicesList.size()/3;
+        for (size_t i = 0; i < meshletVertexList.size(); i++) {
+            meshlet.vertices[i] = meshletVertexList[i];
+        }
+        for (size_t i = 0; i < meshletIndicesList.size(); i++) {
+            meshlet.indices[i] = meshletIndicesList[i];
+        }
+        mesh.meshlets.push_back(meshlet);
     }
 }
 void Engine::createWindow() {
@@ -276,6 +333,16 @@ void Engine::createDevice() {
     VkPhysicalDevice16BitStorageFeatures features16{};
     features16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     features16.storageBuffer16BitAccess = VK_TRUE;
+#if USE_MESH
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderFeatures{};
+    meshShaderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    meshShaderFeatures.meshShader = VK_TRUE;
+    features16.pNext = &meshShaderFeatures;
+    VkPhysicalDeviceMaintenance4Features maintenanceFeatures{};
+    maintenanceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
+    maintenanceFeatures.maintenance4 = VK_TRUE;
+    meshShaderFeatures.pNext = &maintenanceFeatures;
+#endif
     features12.pNext = &features16;
     features.pNext = &features12;
     deviceInfo.pNext = &features;
@@ -403,46 +470,61 @@ void Engine::createSwapchain() {
 }
 void Engine::createDescriptorSetLayout() {
     // describes the descriptor set to be bounded
-    VkDescriptorSetLayoutBinding MVPLayoutBinding{};
-    MVPLayoutBinding.binding = 0; // referenced in the shader
-    MVPLayoutBinding.descriptorCount = 1; // it is possible for a shader variable to represent an array of UBOs
-    MVPLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    MVPLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    MVPLayoutBinding.pImmutableSamplers = nullptr;
+    std::array<VkDescriptorSetLayoutBinding, 2> bindLayoutBinding{};
+    bindLayoutBinding[0].binding = 0; // referenced in the shader
+    bindLayoutBinding[0].descriptorCount = 1; // it is possible for a shader variable to represent an array of UBOs
+    bindLayoutBinding[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+#if USE_MESH
+    bindLayoutBinding[0].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+#else
+    bindLayoutBinding[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+#endif
+    bindLayoutBinding[0].pImmutableSamplers = nullptr;
+    bindLayoutBinding[1].binding = 1;
+    bindLayoutBinding[1].descriptorCount = 1;
+    bindLayoutBinding[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindLayoutBinding[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindLayoutBinding[1].pImmutableSamplers = nullptr;
 
-    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
-    samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
-
-    VkDescriptorSetLayoutBinding bindings[] = {MVPLayoutBinding, samplerLayoutBinding};
-
-    VkDescriptorSetLayoutBinding vertexLayoutBinding{};
-    vertexLayoutBinding.binding = 0;
-    vertexLayoutBinding.descriptorCount = 1;
-    vertexLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    vertexLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    vertexLayoutBinding.pImmutableSamplers = nullptr;
-
-    // this should be a separate set as we are supplying a flag for push descriptors
-    VkDescriptorSetLayoutBinding pushBindings[] = {vertexLayoutBinding};
+// this should be a separate set as we are supplying a flag for push descriptors
+#if USE_MESH
+    std::array<VkDescriptorSetLayoutBinding, 2> pushLayoutBinding{};
+#else
+    std::array<VkDescriptorSetLayoutBinding, 1> pushLayoutBinding{};
+#endif
+    pushLayoutBinding[0].binding = 0;
+    pushLayoutBinding[0].descriptorCount = 1;
+    pushLayoutBinding[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    pushLayoutBinding[0].pImmutableSamplers = nullptr;
+#if USE_MESH
+    pushLayoutBinding[0].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+    pushLayoutBinding[1].binding = 1;
+    pushLayoutBinding[1].descriptorCount = 1;
+    pushLayoutBinding[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    pushLayoutBinding[1].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+    pushLayoutBinding[1].pImmutableSamplers = nullptr;
+#else
+    pushLayoutBinding[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+#endif
 
     // tells the pipeline what kind of descriptor sets to expect
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
     descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutInfo.bindingCount = 2;
-    descriptorSetLayoutInfo.pBindings = bindings;
+    descriptorSetLayoutInfo.bindingCount = bindLayoutBinding.size();
+    descriptorSetLayoutInfo.pBindings = bindLayoutBinding.data();
     VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &descriptorSetLayout));
 
-    descriptorSetLayoutInfo.bindingCount = 1;
-    descriptorSetLayoutInfo.pBindings = pushBindings;
+    descriptorSetLayoutInfo.bindingCount = pushLayoutBinding.size();
+    descriptorSetLayoutInfo.pBindings = pushLayoutBinding.data();
     descriptorSetLayoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &pushDescriptorSetLayout));
 }
 void Engine::createGraphicsPipeline() {
+#if USE_MESH
+    auto vertCode = readFile("../shader.mesh.spv");
+#else
     auto vertCode = readFile("../shader.vert.spv");
+#endif
     auto fragCode = readFile("../shader.frag.spv");
     VkShaderModule vertShaderModule = createShaderModule(vertCode);
     VkShaderModule fragShaderModule = createShaderModule(fragCode);
@@ -450,7 +532,11 @@ void Engine::createGraphicsPipeline() {
     vertInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertInfo.module = vertShaderModule;
     vertInfo.pName = "main";
+#if USE_MESH
+    vertInfo.stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+#else
     vertInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+#endif
     vertInfo.pSpecializationInfo = nullptr; // allows us to specify shader constants
     VkPipelineShaderStageCreateInfo fragInfo{};
     fragInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -716,23 +802,50 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex,
             if (!vkCmdPushDescriptorSetKHR) {
                 throw std::runtime_error("Failed to load vkCmdPushDescriptorSetKHR function");
             }
-            VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = vertexBuffer;
-            bufferInfo.offset = 0;
-            bufferInfo.range = vertexBufferSize;
-            VkWriteDescriptorSet writeDescriptorSet{};
-            writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writeDescriptorSet.dstBinding = 0;
-            writeDescriptorSet.descriptorCount = 1;
-            writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writeDescriptorSet.dstArrayElement = 0;
-            writeDescriptorSet.pBufferInfo = &bufferInfo;
-            vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 1, 1, &writeDescriptorSet);
+#if USE_MESH
+            std::array<VkDescriptorBufferInfo, 2> bufferInfo{};
+            bufferInfo[1].buffer = meshletBuffer;
+            bufferInfo[1].offset = 0;
+            bufferInfo[1].range = meshletBufferSize;
+#else
+            std::array<VkDescriptorBufferInfo, 1> bufferInfo;
+#endif
+            bufferInfo[0].buffer = vertexBuffer;
+            bufferInfo[0].offset = 0;
+            bufferInfo[0].range = vertexBufferSize;
+#if USE_MESH
+            std::array<VkWriteDescriptorSet, 2> writeDescriptorSet{};
+            writeDescriptorSet[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSet[1].dstBinding = 1;
+            writeDescriptorSet[1].descriptorCount = 1;
+            writeDescriptorSet[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writeDescriptorSet[1].dstArrayElement = 0;
+            writeDescriptorSet[1].pBufferInfo = &bufferInfo[1];
+#else
+            std::array<VkWriteDescriptorSet, 1> writeDescriptorSet{};
+#endif
+            writeDescriptorSet[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSet[0].dstBinding = 0;
+            writeDescriptorSet[0].descriptorCount = 1;
+            writeDescriptorSet[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writeDescriptorSet[0].dstArrayElement = 0;
+            writeDescriptorSet[0].pBufferInfo = &bufferInfo[0];
+#if USE_MESH
+            vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 1, 2, writeDescriptorSet.data());
+#else
+            vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 1, 1, writeDescriptorSet.data());
+#endif
 
             vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, &descriptorSets[currFrame], 0, nullptr);
 
             // vkCmdDraw(cmdBuffer, vertices.size(), 1, 0, 0);
-            vkCmdDrawIndexed(cmdBuffer, indices.size(), 1, 0, 0, 0);
+#if USE_MESH
+            PFN_vkCmdDrawMeshTasksEXT vkCmdDrawMeshTasksEXT = 
+                (PFN_vkCmdDrawMeshTasksEXT) vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT");
+            vkCmdDrawMeshTasksEXT(cmdBuffer, mesh.meshlets.size(), 1, 1);
+#else
+            vkCmdDrawIndexed(cmdBuffer, mesh.indices.size(), 1, 0, 0, 0);
+#endif
         }
         vkCmdEndRenderPass(cmdBuffer);
         vkCmdWriteTimestamp(cmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currFrame * 2 + 1);
@@ -756,7 +869,7 @@ void Engine::cleanupSwapchain() {
     vkDestroySwapchainKHR(device, swapchain, nullptr);
 }
 void Engine::createVertexBuffer() {
-    vertexBufferSize = sizeof(vertices[0])*vertices.size();
+    vertexBufferSize = sizeof(mesh.vertices[0])*mesh.vertices.size();
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
     // VK_MEMORY_PROPERTY_HOST_COHERENT_BIT here means GPU keeps track of writes to this buffer
@@ -767,7 +880,7 @@ void Engine::createVertexBuffer() {
     
     void* data;
     vkMapMemory(device, stagingBufferMemory, 0, vertexBufferSize, 0, &data);
-    memcpy(data, vertices.data(), vertexBufferSize);
+    memcpy(data, mesh.vertices.data(), vertexBufferSize);
     vkUnmapMemory(device, stagingBufferMemory);
 
     createBuffer(vertexBuffer, vertexBufferMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vertexBufferSize, 
@@ -779,24 +892,41 @@ void Engine::createVertexBuffer() {
     vkDestroyBuffer(device, stagingBuffer, nullptr);
 }
 void Engine::createIndexBuffer() {
-    VkDeviceSize size = sizeof(indices[0])*indices.size();
+    VkDeviceSize size = sizeof(mesh.indices[0])*mesh.indices.size();
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
-    // VK_MEMORY_PROPERTY_HOST_COHERENT_BIT here means GPU keeps track of writes to this buffer
-    // if the writes are done to cache or they are not done yet, GPU will take it into account
-    // without this flag we have to manually flush writes
     createBuffer(stagingBuffer, stagingBufferMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, size, 
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     
     void* data;
     vkMapMemory(device, stagingBufferMemory, 0, size, 0, &data);
-    memcpy(data, indices.data(), size);
+    memcpy(data, mesh.indices.data(), size);
     vkUnmapMemory(device, stagingBufferMemory);
 
     createBuffer(indexBuffer, indexBufferMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, size, 
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     copyBuffer(stagingBuffer, indexBuffer, size);
+
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+}
+void Engine::createMeshletBuffer() {
+    meshletBufferSize = sizeof(mesh.meshlets[0])*mesh.meshlets.size();
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    createBuffer(stagingBuffer, stagingBufferMemory, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, meshletBufferSize, 
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    
+    void* data;
+    vkMapMemory(device, stagingBufferMemory, 0, meshletBufferSize, 0, &data);
+    memcpy(data, mesh.meshlets.data(), meshletBufferSize);
+    vkUnmapMemory(device, stagingBufferMemory);
+
+    createBuffer(meshletBuffer, meshletBufferMemory, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, meshletBufferSize, 
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    copyBuffer(stagingBuffer, meshletBuffer, meshletBufferSize);
 
     vkFreeMemory(device, stagingBufferMemory, nullptr);
     vkDestroyBuffer(device, stagingBuffer, nullptr);

@@ -1,6 +1,8 @@
 #pragma once
 #include "config.hpp"
 
+#define USE_MESH 1
+
 class Engine {
 public:
     Engine();
@@ -8,6 +10,7 @@ public:
     void run();
 private:
     void loadModel();
+    void createMeshlets();
     void createWindow();
     void createInstance();
     void createDevice();
@@ -22,6 +25,7 @@ private:
     void cleanupSwapchain();
     void createVertexBuffer();
     void createIndexBuffer();
+    void createMeshletBuffer();
     void createUniformBuffers();
     void createDescriptorPool();
     void createDesctiptorSets();
@@ -58,6 +62,9 @@ private:
     VkBuffer indexBuffer;
     VkDeviceSize vertexBufferSize;
     VkDeviceMemory indexBufferMemory;
+    VkBuffer meshletBuffer;
+    VkDeviceMemory meshletBufferMemory;
+    VkDeviceSize meshletBufferSize;
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBufferMemory;
     std::vector<void*> uniformBufferMapped;
@@ -74,9 +81,7 @@ private:
     VkFormat depthFormat;
     uint32_t mipLevels;
     VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
+    Mesh mesh;
 
     bool isDeviceSuitable(VkPhysicalDevice dev);
     QueueFamilies getQueueFamilies(VkPhysicalDevice dev);
@@ -111,7 +116,8 @@ private:
     };
     std::vector<const char*> requiredDeviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME
+        VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+        VK_EXT_MESH_SHADER_EXTENSION_NAME
     };
 
     const int MAX_FRAMES_IN_FLIGHT = 3;
