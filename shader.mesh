@@ -80,6 +80,7 @@ void main() {
         // write the vertices that this workgroup is going to render
         gl_MeshVerticesEXT[i].gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
         fragNormal[i] = getMeshletColor(meshletIndex);
+        // fragNormal[i] = inNormal;
         fragTexCoords[i] = inTexCoords;
     }
 

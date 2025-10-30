@@ -8,6 +8,8 @@ public:
     Engine();
     ~Engine();
     void run();
+    void onKey(int key, int scancode, int action, int mods);
+
 private:
     void loadModel();
     void createMeshlets();
@@ -50,11 +52,17 @@ private:
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
     VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorSetLayout meshDescriptorSetLayout;
     VkDescriptorSetLayout pushDescriptorSetLayout;
+    VkDescriptorSetLayout meshPushDescriptorSetLayout;
     VkDescriptorPool descriptorPool;
+    VkDescriptorPool meshDescriptorPool;
     std::vector<VkDescriptorSet> descriptorSets;
+    std::vector<VkDescriptorSet> meshDescriptorSets;
     VkPipeline gfxPipeline;
     VkPipelineLayout gfxPipelineLayout;
+    VkPipeline meshGfxPipeline;
+    VkPipelineLayout meshGfxPipelineLayout;
     VkRenderPass renderpass;
     std::vector<VkFramebuffer> swapchainFramebuffers;
     VkBuffer vertexBuffer;
@@ -107,6 +115,7 @@ private:
     void generateMipmaps(VkImage image, uint32_t texWidth, uint32_t texHeight, uint32_t mipLevels, VkFormat format);
     VkSampleCountFlagBits getMaxSamples();
     void createQueryPool();
+    void isMeshShaderSupported();
     std::vector<const char*> requiredInstanceLayers = {
         "VK_LAYER_KHRONOS_validation"
     };
@@ -117,7 +126,6 @@ private:
     std::vector<const char*> requiredDeviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-        VK_EXT_MESH_SHADER_EXTENSION_NAME
     };
 
     const int MAX_FRAMES_IN_FLIGHT = 3;
@@ -126,4 +134,7 @@ private:
     VkQueryPool queryPool;
     std::vector<uint64_t> queryResults;
     std::vector<double> gpuTimes;
+
+    bool MESH_SHADERS_SUPPORTED = false;
+    bool MESH_SHADERS_ENABLED = false;
 };
