@@ -31,7 +31,7 @@ Engine::Engine() {
     createTextureSampler();
     createDescriptorSetLayout();
     createDescriptorPool();
-    createDesctiptorSets();
+    createDescriptorSets();
     createGraphicsPipeline();
     createVertexBuffer();
     createIndexBuffer();
@@ -57,13 +57,9 @@ Engine::~Engine() {
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vkDestroyPipeline(device, meshGfxPipeline, nullptr);
     vkDestroyPipeline(device, gfxPipeline, nullptr);
-    vkDestroyDescriptorSetLayout(device, meshDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorSetLayout(device, meshPushDescriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, pushDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(device, meshDescriptorPool, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-    vkDestroyPipelineLayout(device, meshGfxPipelineLayout, nullptr);
     vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderpass, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -496,7 +492,7 @@ void Engine::createDescriptorSetLayout() {
     bindLayoutBinding[0].binding = 0; // referenced in the shader
     bindLayoutBinding[0].descriptorCount = 1; // it is possible for a shader variable to represent an array of UBOs
     bindLayoutBinding[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindLayoutBinding[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    bindLayoutBinding[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_MESH_BIT_EXT;
     bindLayoutBinding[0].pImmutableSamplers = nullptr;
     bindLayoutBinding[1].binding = 1;
     bindLayoutBinding[1].descriptorCount = 1;
@@ -510,53 +506,24 @@ void Engine::createDescriptorSetLayout() {
     descriptorSetLayoutInfo.bindingCount = bindLayoutBinding.size();
     descriptorSetLayoutInfo.pBindings = bindLayoutBinding.data();
     VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &descriptorSetLayout));
-    if (MESH_SHADERS_SUPPORTED) {
-        std::array<VkDescriptorSetLayoutBinding, 2> meshBindLayoutBinding{};
-        meshBindLayoutBinding[0].binding = 0; // referenced in the shader
-        meshBindLayoutBinding[0].descriptorCount = 1; // it is possible for a shader variable to represent an array of UBOs
-        meshBindLayoutBinding[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        meshBindLayoutBinding[0].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
-        meshBindLayoutBinding[0].pImmutableSamplers = nullptr;
-        meshBindLayoutBinding[1].binding = 1;
-        meshBindLayoutBinding[1].descriptorCount = 1;
-        meshBindLayoutBinding[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        meshBindLayoutBinding[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        meshBindLayoutBinding[1].pImmutableSamplers = nullptr;
-        descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorSetLayoutInfo.bindingCount = meshBindLayoutBinding.size();
-        descriptorSetLayoutInfo.pBindings = meshBindLayoutBinding.data();
-        VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &meshDescriptorSetLayout));
-    }
 
     // this should be a separate set as we are supplying a flag for push descriptors
-    std::array<VkDescriptorSetLayoutBinding, 1> pushLayoutBinding{};
+    std::array<VkDescriptorSetLayoutBinding, 2> pushLayoutBinding{};
     pushLayoutBinding[0].binding = 0;
     pushLayoutBinding[0].descriptorCount = 1;
     pushLayoutBinding[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     pushLayoutBinding[0].pImmutableSamplers = nullptr;
-    pushLayoutBinding[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushLayoutBinding[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_MESH_BIT_EXT;
+    pushLayoutBinding[1].binding = 1;
+    pushLayoutBinding[1].descriptorCount = 1;
+    pushLayoutBinding[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    pushLayoutBinding[1].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+    pushLayoutBinding[1].pImmutableSamplers = nullptr;
 
-    descriptorSetLayoutInfo.bindingCount = pushLayoutBinding.size();
+    descriptorSetLayoutInfo.bindingCount = MESH_SHADERS_SUPPORTED ? pushLayoutBinding.size() : 1;
     descriptorSetLayoutInfo.pBindings = pushLayoutBinding.data();
     descriptorSetLayoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
     VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &pushDescriptorSetLayout));
-    if (MESH_SHADERS_SUPPORTED) {
-        std::array<VkDescriptorSetLayoutBinding, 2> meshPushLayoutBinding{};
-        meshPushLayoutBinding[0].binding = 0;
-        meshPushLayoutBinding[0].descriptorCount = 1;
-        meshPushLayoutBinding[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        meshPushLayoutBinding[0].pImmutableSamplers = nullptr;
-        meshPushLayoutBinding[0].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
-        meshPushLayoutBinding[1].binding = 1;
-        meshPushLayoutBinding[1].descriptorCount = 1;
-        meshPushLayoutBinding[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        meshPushLayoutBinding[1].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
-        meshPushLayoutBinding[1].pImmutableSamplers = nullptr;
-        descriptorSetLayoutInfo.bindingCount = meshPushLayoutBinding.size();
-        descriptorSetLayoutInfo.pBindings = meshPushLayoutBinding.data();
-        descriptorSetLayoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-        VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutInfo, nullptr, &meshPushDescriptorSetLayout));
-    }
 }
 void Engine::createGraphicsPipeline() {
     auto vertCode = readFile("../shader.vert.spv");
@@ -689,15 +656,7 @@ void Engine::createGraphicsPipeline() {
 
         pipelineInfo.stageCount = shaderStageInfos.size();
         pipelineInfo.pStages = shaderStageInfos.data();
-
-        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.pushConstantRangeCount = 0;
-        pipelineLayoutInfo.pPushConstantRanges = nullptr;
-        pipelineLayoutInfo.setLayoutCount = 2;
-        VkDescriptorSetLayout layouts[] = {meshDescriptorSetLayout, meshPushDescriptorSetLayout};
-        pipelineLayoutInfo.pSetLayouts = layouts;
-        VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshGfxPipelineLayout));
-        pipelineInfo.layout = meshGfxPipelineLayout;
+        
         VK_CHECK(vkCreateGraphicsPipelines(device, nullptr, 1, &pipelineInfo, nullptr, &meshGfxPipeline));
         vkDestroyShaderModule(device, meshShaderModule, nullptr);
     }
@@ -829,10 +788,11 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex,
         // VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS: render pass commands will be executed from secondary command buffer
         vkCmdBeginRenderPass(cmdBuffer, &renderpassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         {
-            if (MESH_SHADERS_ENABLED)
+            if (MESH_SHADERS_ENABLED) {
                 vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, meshGfxPipeline);
-            else
+            } else {
                 vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipeline);
+            }
 
             // VkDeviceSize offsets[] = {0};
             // vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &vertexBuffer, offsets);
@@ -858,50 +818,38 @@ void Engine::recordCommandBuffer(VkCommandBuffer cmdBuffer, uint32_t imageIndex,
             if (!vkCmdPushDescriptorSetKHR) {
                 throw std::runtime_error("Failed to load vkCmdPushDescriptorSetKHR function");
             }
+            std::vector<VkDescriptorBufferInfo> bufferInfo{};
+            std::vector<VkWriteDescriptorSet> writeDescriptorSet{};
             if (MESH_SHADERS_ENABLED) {
-                std::array<VkDescriptorBufferInfo, 2> bufferInfo{};
-                bufferInfo[0].buffer = vertexBuffer;
-                bufferInfo[0].offset = 0;
-                bufferInfo[0].range = vertexBufferSize;
+                bufferInfo.resize(2);
+                writeDescriptorSet.resize(2);
                 bufferInfo[1].buffer = meshletBuffer;
                 bufferInfo[1].offset = 0;
                 bufferInfo[1].range = meshletBufferSize;
-                std::array<VkWriteDescriptorSet, 2> writeDescriptorSet{};
                 writeDescriptorSet[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 writeDescriptorSet[1].dstBinding = 1;
                 writeDescriptorSet[1].descriptorCount = 1;
                 writeDescriptorSet[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                 writeDescriptorSet[1].dstArrayElement = 0;
                 writeDescriptorSet[1].pBufferInfo = &bufferInfo[1];
-                writeDescriptorSet[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                writeDescriptorSet[0].dstBinding = 0;
-                writeDescriptorSet[0].descriptorCount = 1;
-                writeDescriptorSet[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                writeDescriptorSet[0].dstArrayElement = 0;
-                writeDescriptorSet[0].pBufferInfo = &bufferInfo[0];
-                vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, meshGfxPipelineLayout, 1, 2, writeDescriptorSet.data());
             } else {
-                std::array<VkDescriptorBufferInfo, 1> bufferInfo;
-                bufferInfo[0].buffer = vertexBuffer;
-                bufferInfo[0].offset = 0;
-                bufferInfo[0].range = vertexBufferSize;
-                std::array<VkWriteDescriptorSet, 1> writeDescriptorSet{};
-                writeDescriptorSet[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                writeDescriptorSet[0].dstBinding = 0;
-                writeDescriptorSet[0].descriptorCount = 1;
-                writeDescriptorSet[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                writeDescriptorSet[0].dstArrayElement = 0;
-                writeDescriptorSet[0].pBufferInfo = &bufferInfo[0];
-                vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 1, 1, writeDescriptorSet.data());
+                bufferInfo.resize(1);
+                writeDescriptorSet.resize(1);
             }
+            writeDescriptorSet[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSet[0].dstBinding = 0;
+            writeDescriptorSet[0].descriptorCount = 1;
+            writeDescriptorSet[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writeDescriptorSet[0].dstArrayElement = 0;
+            writeDescriptorSet[0].pBufferInfo = &bufferInfo[0];
+            bufferInfo[0].buffer = vertexBuffer;
+            bufferInfo[0].offset = 0;
+            bufferInfo[0].range = vertexBufferSize;
+            vkCmdPushDescriptorSetKHR(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 1, 
+                MESH_SHADERS_ENABLED ? 2 : 1, writeDescriptorSet.data());
 
-            if (MESH_SHADERS_ENABLED) {
-                vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, meshGfxPipelineLayout, 0, 1,
-                    &meshDescriptorSets[currFrame], 0, nullptr);
-            } else {
-                vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, 
-                    &descriptorSets[currFrame], 0, nullptr);
-            }
+            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1,
+                &descriptorSets[currFrame], 0, nullptr);
 
             // vkCmdDraw(cmdBuffer, vertices.size(), 1, 0, 0);
             if (MESH_SHADERS_ENABLED) {
@@ -1025,11 +973,8 @@ void Engine::createDescriptorPool() {
     poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT; // max number of descriptor sets allocated from this pool
 
     VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool));
-    if (MESH_SHADERS_SUPPORTED) {
-        VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &meshDescriptorPool));
-    }
 }
-void Engine::createDesctiptorSets() {
+void Engine::createDescriptorSets() {
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
     VkDescriptorSetAllocateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1038,13 +983,6 @@ void Engine::createDesctiptorSets() {
     info.pSetLayouts = layouts.data(); // must be supplied for each descriptor set
     descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
     VK_CHECK(vkAllocateDescriptorSets(device, &info, descriptorSets.data()));
-    if (MESH_SHADERS_SUPPORTED) {
-        std::vector<VkDescriptorSetLayout> meshLayouts(MAX_FRAMES_IN_FLIGHT, meshDescriptorSetLayout);
-        info.pSetLayouts = meshLayouts.data();
-        info.descriptorPool = meshDescriptorPool;
-        meshDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-        VK_CHECK(vkAllocateDescriptorSets(device, &info, meshDescriptorSets.data()));
-    }
     // configuration of the descriptor sets
     for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorBufferInfo bufferInfo{};
@@ -1079,11 +1017,6 @@ void Engine::createDesctiptorSets() {
         descriptorWrites[1].pTexelBufferView = nullptr;
 
         vkUpdateDescriptorSets(device, 2, descriptorWrites.data(), 0, nullptr);
-        if (MESH_SHADERS_SUPPORTED) {
-            descriptorWrites[0].dstSet = meshDescriptorSets[i];
-            descriptorWrites[1].dstSet = meshDescriptorSets[i];
-            vkUpdateDescriptorSets(device, 2, descriptorWrites.data(), 0, nullptr);
-        }
     }
 }
 void Engine::updateUniformBuffers(uint32_t index) {

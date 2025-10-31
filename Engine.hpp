@@ -30,7 +30,7 @@ private:
     void createMeshletBuffer();
     void createUniformBuffers();
     void createDescriptorPool();
-    void createDesctiptorSets();
+    void createDescriptorSets();
     void updateUniformBuffers(uint32_t index);
     void createTextureImage();
     void createTextureSampler();
@@ -52,17 +52,12 @@ private:
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
     VkDescriptorSetLayout descriptorSetLayout;
-    VkDescriptorSetLayout meshDescriptorSetLayout;
     VkDescriptorSetLayout pushDescriptorSetLayout;
-    VkDescriptorSetLayout meshPushDescriptorSetLayout;
     VkDescriptorPool descriptorPool;
-    VkDescriptorPool meshDescriptorPool;
     std::vector<VkDescriptorSet> descriptorSets;
-    std::vector<VkDescriptorSet> meshDescriptorSets;
     VkPipeline gfxPipeline;
     VkPipelineLayout gfxPipelineLayout;
     VkPipeline meshGfxPipeline;
-    VkPipelineLayout meshGfxPipelineLayout;
     VkRenderPass renderpass;
     std::vector<VkFramebuffer> swapchainFramebuffers;
     VkBuffer vertexBuffer;
