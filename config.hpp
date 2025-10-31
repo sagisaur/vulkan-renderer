@@ -29,7 +29,9 @@
 #include <GLFW/glfw3.h>
 
 struct Vertex {
-    uint16_t x, y, z, w;
+    // instead of using floats (32 bits) we will use uint16_t, which are
+    // actually float16_t in the shader
+    uint16_t x, y, z, w; // w is only for alignment
     uint8_t nx, ny, nz, nw;
     uint16_t tx, ty;
     bool operator==(const Vertex& other) const {
@@ -73,6 +75,8 @@ namespace std {
     };
 }
 
+// this double indexing is more memory efficient compared to
+// simply storing 126*3 indices of size uint32_t
 struct Meshlet {
     uint32_t vertices[64];
     uint8_t indices[126*3];
@@ -151,6 +155,10 @@ static std::vector<char> readFile(std::string filename) {
     return buffer;
 }
 
+// this is important as simply using reinterpret_cast<uint16_t> doesn't work
+// it would only read 16 bits of the float
+// this function allows us to rebias exponent, shrink mantissa and store the resulting
+// 16 bits inside uint16_t, which later are going to be interpreted as float16_t in the shader bitwise
 inline uint16_t floatToHalf(float f) {
     union { float f; uint32_t i; } u = { f };
     

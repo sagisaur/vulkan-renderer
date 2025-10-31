@@ -11,6 +11,7 @@ find_package(glm CONFIG REQUIRED)
 set(SOURCES
     main.cpp
     Engine.cpp
+    Shaders.cpp
 )
 set(SHADER_FILES
     ../shader.vert
